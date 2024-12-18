@@ -908,8 +908,8 @@ class EEGPTClassifier(nn.Module):
         x = self.head(x)
         return x
     
-    # def load_state_dict(self, state_dict, strict: bool = False):
-    #     return super().load_state_dict(state_dict, strict)
+    def load_state_dict(self, state_dict, strict: bool = False):
+        return super().load_state_dict(state_dict, strict)
         
 if __name__=="__main__":
     use_channels_names = [      
