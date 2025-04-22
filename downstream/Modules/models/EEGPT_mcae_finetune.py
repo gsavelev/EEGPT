@@ -13,7 +13,7 @@ import torch
 
 from logging import getLogger
 
-from downstream.Modules.models.lora import add_lora_to_model
+from Modules.models.lora import add_lora_to_model
 
 logger = getLogger()
 
