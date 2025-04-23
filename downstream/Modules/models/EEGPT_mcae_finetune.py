@@ -13,8 +13,6 @@ import torch
 
 from logging import getLogger
 
-from .lora import add_lora_to_model
-
 logger = getLogger()
 
 
@@ -744,11 +742,6 @@ class EEGPTClassifier(nn.Module):
                  
                  use_predictor = False,
                  use_out_proj = False,
-                 
-                 use_lora = False,
-                 lora_rank = 8,
-                 lora_alpha = 32,
-                 lora_dropout = 0.1,
                  **kwargs):
         
         super().__init__()    
@@ -759,13 +752,6 @@ class EEGPTClassifier(nn.Module):
         self.use_avg = use_avg
         self.use_out_proj = use_out_proj
         self.use_chan_conv = use_chan_conv
-        
-        # Store LoRA parameters
-        self.use_lora = use_lora
-        self.lora_rank = lora_rank
-        self.lora_alpha = lora_alpha
-        self.lora_dropout = lora_dropout
-        
         if use_chan_conv:
             self.chan_conv      = torch.nn.Sequential(
                 Conv1dWithConstraint(in_channels, img_size[0], 1, max_norm=max_norm_chan_conv, doWeightNorm=(max_norm_chan_conv>0)),
@@ -857,10 +843,7 @@ class EEGPTClassifier(nn.Module):
             
         # else:
         #     self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-        
-        if use_lora:
-            self = add_lora_to_model(self, rank=lora_rank, alpha=lora_alpha, dropout=lora_dropout)
-            
+    
     def get_num_layers(self):
         if self.use_predictor:
             return self.target_encoder.get_num_layers() + self.predictor.get_num_layers()
@@ -925,65 +908,9 @@ class EEGPTClassifier(nn.Module):
         x = self.head(x)
         return x
     
-    def add_lora(self, rank=8, alpha=32, dropout=0.1):
-        """
-        Add LoRA adapters to the model after it's been created
-        """
-        if not self.use_lora:
-            self = add_lora_to_model(self, rank=rank, alpha=alpha, dropout=dropout)
-            self.use_lora = True
-            self.lora_rank = rank
-            self.lora_alpha = alpha
-            self.lora_dropout = dropout
-        return self
+    # def load_state_dict(self, state_dict, strict: bool = False):
+    #     return super().load_state_dict(state_dict, strict)
         
-    def enable_lora_training(self):
-        """
-        Freeze base model parameters and enable only LoRA parameters for training
-        """
-        if self.use_lora:
-            # Freeze all parameters
-            for param in self.parameters():
-                param.requires_grad = False
-                
-            # Unfreeze LoRA parameters
-            for name, module in self.named_modules():
-                if hasattr(module, 'lora'):
-                    module.lora.lora_A.requires_grad = True
-                    module.lora.lora_B.requires_grad = True
-        return self
-                    
-    def save_lora_parameters(self, path):
-        """
-        Save only the LoRA parameters to a file
-        """
-        if not self.use_lora:
-            raise ValueError("Model does not have LoRA adapters")
-            
-        lora_state_dict = {}
-        for name, module in self.named_modules():
-            if hasattr(module, 'lora'):
-                lora_state_dict[f"{name}.lora.lora_A"] = module.lora.lora_A.data
-                lora_state_dict[f"{name}.lora.lora_B"] = module.lora.lora_B.data
-                
-        torch.save(lora_state_dict, path)
-        
-    def load_lora_parameters(self, path):
-        """
-        Load LoRA parameters from a file
-        """
-        if not self.use_lora:
-            raise ValueError("Model does not have LoRA adapters. Call add_lora() first.")
-            
-        lora_state_dict = torch.load(path)
-        
-        for name, module in self.named_modules():
-            if hasattr(module, 'lora'):
-                if f"{name}.lora.lora_A" in lora_state_dict:
-                    module.lora.lora_A.data.copy_(lora_state_dict[f"{name}.lora.lora_A"])
-                if f"{name}.lora.lora_B" in lora_state_dict:
-                    module.lora.lora_B.data.copy_(lora_state_dict[f"{name}.lora.lora_B"])
-
 if __name__=="__main__":
     use_channels_names = [      
                'FP1', 'FP2',

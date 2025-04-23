@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import math
 
 class LoRALayer(nn.Module):
@@ -76,26 +75,36 @@ def make_lora_module_trainable(module):
             submodule.lora.lora_A.requires_grad = True
             submodule.lora.lora_B.requires_grad = True
 
-def add_lora_to_model(model, rank=8, alpha=32, dropout=0.1):
+def add_lora_to_model(model, target_modules=None, rank=8, alpha=32, dropout=0.1):
     """
     Add LoRA to all attention layers in the model
+    
+    Parameters:
+    -----------
+    model : nn.Module
+        The model to add LoRA to
+    target_modules : list or None
+        List of module names to apply LoRA to. If None, applies to all attention blocks
+    rank : int
+        Rank of the LoRA decomposition
+    alpha : int
+        Scaling factor for LoRA
+    dropout : float
+        Dropout probability for LoRA layers
     """
-    # Add LoRA to encoder attention layers
-    for block in model.target_encoder.blocks:
-        add_lora_to_attention(block.attn, rank, alpha, dropout)
+    lora_params = []
     
-    # Add LoRA to reconstructor/predictor attention layers
-    if hasattr(model, 'reconstructor'):
-        for block in model.reconstructor.reconstructor_blocks:
+    # Apply LoRA to encoder attention layers
+    for name, block in model.named_modules():
+        if hasattr(block, 'attn') and (target_modules is None or any(t in name for t in target_modules)):
             add_lora_to_attention(block.attn, rank, alpha, dropout)
-    elif hasattr(model, 'predictor'):
-        for block in model.predictor.predictor_blocks:
-            add_lora_to_attention(block.attn, rank, alpha, dropout)
+            
+            # Collect LoRA parameters
+            lora_params.extend([
+                block.attn.qkv.lora.lora_A,
+                block.attn.qkv.lora.lora_B,
+                block.attn.proj.lora.lora_A,
+                block.attn.proj.lora.lora_B
+            ])
     
-    # Add LoRA to classifier head
-    apply_lora_to_linear(model.head, rank, alpha, dropout)
-    
-    # Make only LoRA parameters trainable
-    make_lora_module_trainable(model)
-    
-    return model 
+    return model, lora_params 
