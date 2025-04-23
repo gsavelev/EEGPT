@@ -6,10 +6,9 @@ import pytorch_lightning as pl
 from typing import Any
 from sklearn import metrics
 
+from downstream.utils_eval import get_metrics
 from .lora import add_lora_to_model, apply_lora_to_linear, make_lora_module_trainable
 from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint
-
-from utils_eval import get_metrics
 
 
 class EEGPTCalibry(pl.LightningModule):
