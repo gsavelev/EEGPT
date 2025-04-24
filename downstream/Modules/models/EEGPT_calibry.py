@@ -42,12 +42,11 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
                  **kwargs
                  ):
         # Change to use super() which proddperly handles method resolution order
-        super().__init__()
+        super().__init__(num_classes=num_classes)
         
         # Initialize basic parameters
         self.chans_num = len(ch_names)
         self.use_lora = use_lora
-        self.num_classes = num_classes  # Explicitly store num_classes
         
         # Store hyperparameters
         self.save_hyperparameters()
