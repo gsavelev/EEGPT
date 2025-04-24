@@ -7,9 +7,9 @@ import torch.nn.functional as F
 from functools import partial
 import pytorch_lightning as pl
 
-from ...utils_eval import get_metrics
-from .lora import add_lora_to_model
-from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint
+from downstream.utils_eval import get_metrics
+from downstream.Modules.PEFT.lora import add_lora_to_model
+from downstream.Modules.models.EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint
 
 
 class EEGPTCalibry(pl.LightningModule):
@@ -36,10 +36,8 @@ class EEGPTCalibry(pl.LightningModule):
         self.use_lora = use_lora
         self.lora_params = None
         
-        # Store hyperparameters
         self.save_hyperparameters()
         
-        # Create target encoder directly
         self.target_encoder = EEGTransformer(
             img_size=[self.chans_num, int(2.1*256)],
             patch_size=32*2,
@@ -59,7 +57,6 @@ class EEGPTCalibry(pl.LightningModule):
         
         self.chan_ids = self.target_encoder.prepare_chan_ids(ch_names)
         
-        # Load pretrained weights
         pretrain_ckpt = torch.load(load_path)
         target_encoder_stat = {}
         for k, v in pretrain_ckpt['state_dict'].items():
@@ -68,14 +65,12 @@ class EEGPTCalibry(pl.LightningModule):
                 
         self.target_encoder.load_state_dict(target_encoder_stat)
         
-        # Custom channel scaling 
         self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001*torch.rand((1, self.chans_num, 1)), requires_grad=True)
         
         # Freeze model params
         for param in self.target_encoder.parameters():
             param.requires_grad = False
             
-        # Custom linear probes 
         self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
         self.linear_probe2 = LinearWithConstraint(240, self.num_classes, max_norm=0.25)
         
@@ -99,75 +94,24 @@ class EEGPTCalibry(pl.LightningModule):
         self.max_epochs = max_epochs
 
     def forward(self, x):
+        B, C, T = x.shape
+
         x = x.to(torch.float)
         x = x - x.mean(dim=-2, keepdim=True)
-        
-        print(f"[DEBUG] Input shape: {x.shape}, Expected channels: {self.chans_num}") # Debug print
+        x = x[:,self.chan_ids,:]
+        x = x * self.chan_scale
 
-        # Check if channel dimensions match
-        if self.chans_num != x.shape[1]:
-            print(f"Warning: Input has {x.shape[1]} channels but model expects {self.chans_num}. Adjusting...")
-            if x.shape[1] > self.chans_num:
-                x = x[:, :self.chans_num, :] # Select first self.chans_num channels
-                print(f"[DEBUG] Truncated shape: {x.shape}") # Debug print
-            else:
-                padding_channels = self.chans_num - x.shape[1]
-                padding = torch.zeros(x.shape[0], padding_channels, x.shape[2], device=x.device, dtype=x.dtype) # Ensure dtype matches
-                x = torch.cat([x, padding], dim=1) # Pad with zeros
-                print(f"[DEBUG] Padded shape: {x.shape}") # Debug print
-        
-        # Ensure chan_ids are prepared correctly for the expected self.chans_num
-        # This happens during init, so it should match self.chans_num. Add check just in case.
-        if not hasattr(self, 'chan_ids') or self.chan_ids is None or len(self.chan_ids) != self.chans_num:
-             print(f"Error: Mismatch between self.chans_num ({self.chans_num}) and prepared chan_ids ({len(self.chan_ids) if hasattr(self, 'chan_ids') and self.chan_ids is not None else 'None'}). Check model initialization and ch_names.")
-             # Raising an error might be better than proceeding with potentially incorrect chan_ids
-             raise ValueError("Channel ID mismatch detected in forward pass.")
-             
-        # Apply channel selection and scaling
-        # Ensure chan_ids indices are valid for the current shape of x
-        if x.shape[1] == self.chans_num:
-            print(f"[DEBUG] Selecting channels using chan_ids (length {len(self.chan_ids)}): {self.chan_ids}") # Verbose debug print
-            x_selected = x[:, self.chan_ids, :]
-            print(f"[DEBUG] Shape after channel selection: {x_selected.shape}") # Verbose debug print
-            
-            # Ensure chan_scale matches the number of selected channels
-            if self.chan_scale.shape[1] == x_selected.shape[1]:
-                 x = x_selected * self.chan_scale
-                 print(f"[DEBUG] Shape after scaling: {x.shape}") # Verbose debug print
-            else:
-                print(f"Warning: chan_scale dimension ({self.chan_scale.shape[1]}) doesn't match selected channels ({x_selected.shape[1]}). Skipping scaling.")
-                x = x_selected # Skip scaling if dimensions mismatch
-        else:
-            # This case should not be reached if the adjustment logic above works
-            print(f"Warning: Shape mismatch before channel selection. Shape is {x.shape}, expected {self.chans_num} channels. Skipping selection and scaling.")
+        self.target_encoder.eval()
+        z = self.target_encoder(x, self.chan_ids.to(x))
 
-        # Use eval mode for feature extraction but LoRA still works in eval mode (?) - check PEFT docs
-        # If only training probes/LoRA, keep backbone frozen. If LoRA modifies backbone, it should be fine.
-        # self.target_encoder.eval() # Commenting out - PL should handle modes. Might interfere with LoRA gradients.
-        
-        print(f"[DEBUG] Shape before target_encoder: {x.shape}") # Debug print
-        z = self.target_encoder(x, self.chan_ids.to(x.device))
-        print(f"[DEBUG] Shape after target_encoder (z): {z.shape}") # Debug print
-
-        # Flattening logic might depend on whether a CLS token is used. Assume z is [B, N, E]
-        # Original: h = z.flatten(2) # Flattens dims from 2 onwards. For [B, N, E], this is just [B, N, E].
-        # The linear layer dimensions (2048, 240) suggest a specific flattening strategy was used during pretraining.
-        h = z.flatten(2) 
-        print(f"[DEBUG] Shape after z.flatten(2): {h.shape}") # Verbose debug print
+        h = z.flatten(2)
         h = self.linear_probe1(self.drop(h))
-        print(f"[DEBUG] Shape after linear_probe1: {h.shape}") # Verbose debug print
         h = h.flatten(1)
-        print(f"[DEBUG] Shape after h.flatten(1): {h.shape}") # Verbose debug print
         h = self.linear_probe2(h)
-        print(f"[DEBUG] Shape after linear_probe2 (logits): {h.shape}") # Verbose debug print
 
-        # Return processed x and logits h. Returning x might be for debugging or specific loss calculation not shown.
         return x, h
 
     def save_lora_parameters(self, path):
-        """
-        Save only the LoRA parameters to a file
-        """
         if not self.use_lora:
             raise ValueError("Model does not have LoRA adapters")
             
@@ -180,9 +124,6 @@ class EEGPTCalibry(pl.LightningModule):
         torch.save(lora_state_dict, path)
         
     def load_lora_parameters(self, path):
-        """
-        Load LoRA parameters from a file
-        """
         if not self.use_lora:
             raise ValueError("Model does not have LoRA adapters")
             
@@ -211,13 +152,10 @@ class EEGPTCalibry(pl.LightningModule):
         return super().on_train_epoch_end()
 
     def training_step(self, batch, batch_idx):
-        # training_step defined the train loop.
-        # It is independent of forward
         x, y = batch
         label = y.long()
         
-        # The forward method returns x_processed, logit
-        _, logit = self.forward(x) # We only need the logits for loss calculation here
+        _, logit = self.forward(x)
         loss = self.loss_fn(logit, label)
         preds = torch.argmax(logit, dim=-1)
         accuracy = ((preds==label)*1.0).mean()
@@ -256,7 +194,7 @@ class EEGPTCalibry(pl.LightningModule):
         results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics_list, True)
 
         for key, value in results.items():
-            self.log('valid_'+key, value, on_epoch=True, on_step=False, sync_dist=True)
+            self.log('valid_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
 
         return super().on_validation_epoch_end()
 
@@ -264,8 +202,7 @@ class EEGPTCalibry(pl.LightningModule):
         x, y = batch
         label = y.long()
         
-        # The forward method returns x_processed, logit
-        _, logit = self.forward(x) # We only need the logits for loss calculation here
+        _, logit = self.forward(x)
 
         preds = torch.argmax(logit, dim=-1)
         accuracy = ((preds==label)*1.0).mean()
@@ -285,8 +222,7 @@ class EEGPTCalibry(pl.LightningModule):
         x, y = batch
         label = y.long()
         
-        # The forward method returns x_processed, logit
-        _, logit = self.forward(x) # We only need the logits here
+        _, logit = self.forward(x)
         loss = self.loss_fn(logit, label)
         preds = torch.argmax(logit, dim=-1)
         accuracy = ((preds==label)*1.0).mean()
@@ -304,7 +240,6 @@ class EEGPTCalibry(pl.LightningModule):
         # Parameters to optimize: channel scale and linear probes plus LoRA params if used
         params_to_optimize = [self.chan_scale] + list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
         
-        # Add LoRA parameters if used
         if self.use_lora and self.lora_params:
             params_to_optimize.extend(self.lora_params)
         

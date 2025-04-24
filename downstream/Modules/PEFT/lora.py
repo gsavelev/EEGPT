@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import math
 
+
 class LoRALayer(nn.Module):
     def __init__(self, in_dim, out_dim, rank=8, alpha=32, dropout=0.1):
         super().__init__()
@@ -11,12 +12,10 @@ class LoRALayer(nn.Module):
         self.alpha = alpha
         self.scaling = alpha / rank
         
-        # Low-rank decomposition matrices
         self.lora_A = nn.Parameter(torch.zeros(in_dim, rank))
         self.lora_B = nn.Parameter(torch.zeros(rank, out_dim))
         self.lora_dropout = nn.Dropout(dropout)
         
-        # Initialize weights
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)
         
@@ -32,10 +31,8 @@ def apply_lora_to_linear(linear_layer, rank=8, alpha=32, dropout=0.1):
     in_dim, out_dim = linear_layer.weight.shape[1], linear_layer.weight.shape[0]
     lora = LoRALayer(in_dim, out_dim, rank, alpha, dropout)
     
-    # Store original forward
     original_forward = linear_layer.forward
     
-    # Define new forward with LoRA
     def forward_with_lora(x):
         original_output = original_forward(x)
         lora_output = lora(x)
