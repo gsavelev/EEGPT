@@ -20,9 +20,7 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
                  max_lr=1e-3,
                  steps_per_epoch=100,
                  max_epochs=10,
-                 channels_index=None,
-                 # EEGPTClassifier parameters
-                 num_classes=2,  # Binary classification
+                 num_classes=2,
                  use_mean_pooling=False,
                  use_chan_conv=False,
                  max_norm_chan_conv=1,
@@ -49,11 +47,9 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
         # Initialize basic parameters needed for EEGPTClassifier later
         self.chans_num = len(ch_names)
         self.use_lora = use_lora
-        self.lora_params = None
-        self.channels_index = channels_index if channels_index is not None else torch.arange(self.chans_num)
         
         # Store hyperparameters
-        self.save_hyperparameters(ignore=['channels_index'])
+        self.save_hyperparameters()
         
         # Initialize the parent EEGPTClassifier with all parameters
         EEGPTClassifier.__init__(

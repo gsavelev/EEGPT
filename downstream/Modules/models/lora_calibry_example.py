@@ -1,4 +1,7 @@
 import os
+import random
+from glob import glob
+
 import torch
 import numpy as np
 import pytorch_lightning as pl
@@ -6,7 +9,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from torch.utils.data import DataLoader, TensorDataset
 from EEGPT_calibry import EEGPTCalibry
 
-def prepare_p300_data(dataset_fold, subject_id, samples_per_class=50):
+def prepare_p300_data(dataset_fold, subject_id, samples_per_class=50, paradigm_type="erp", sampling_rate=256):
     """
     Prepare P300 dataset for a specific subject
     
@@ -18,17 +21,16 @@ def prepare_p300_data(dataset_fold, subject_id, samples_per_class=50):
         Subject ID for which to prepare adaptation data
     samples_per_class : int
         Number of samples to select per class (target/non-target)
+    paradigm_type : str
+        Type of paradigm ("erp", "motor_imagery", "sleep_staging", etc.)
+    sampling_rate : int
+        Sampling rate of the EEG data
         
     Returns:
     --------
     data_dict : dict
         Dictionary containing train, validation and test data
     """
-    import os
-    import torch
-    import random
-    import numpy as np
-    from glob import glob
     
     # Get list of all files for this subject
     class_0_files = glob(os.path.join(dataset_fold, '0', f'*.sub{subject_id}'))
@@ -74,7 +76,11 @@ def prepare_p300_data(dataset_fold, subject_id, samples_per_class=50):
     val_labels = [0] * len(val_files_0) + [1] * len(val_files_1)
     test_labels = [0] * len(test_files_0) + [1] * len(test_files_1)
     
-    # Load data
+    # Calculate maximum time length based on model patch size and paradigm
+    model_patch_size = 32*2  # Assuming the standard model patch size
+    max_time_length = calc_min_sample_length(model_patch_size, paradigm_type, sampling_rate)
+    
+    # Load data and cut to appropriate length
     def load_data_files(files):
         data = []
         for file in files:
@@ -82,6 +88,14 @@ def prepare_p300_data(dataset_fold, subject_id, samples_per_class=50):
             # Add channel dimension if needed
             if len(x.shape) == 2:  # [channels, time]
                 x = x.unsqueeze(0)  # [1, channels, time]
+            
+            # Cut sample to maximum time length
+            _, C, T = x.shape
+            if T > max_time_length:
+                # Center the sample in the time dimension
+                start_idx = (T - max_time_length) // 2
+                x = x[:, :, start_idx:start_idx+max_time_length]
+            
             data.append(x)
         return data
     
@@ -98,6 +112,9 @@ def prepare_p300_data(dataset_fold, subject_id, samples_per_class=50):
     
     x_test = torch.stack(test_data, dim=0)
     y_test = torch.tensor(test_labels, dtype=torch.long)
+    
+    print(f"Sample shapes - Train: {x_train.shape}, Val: {x_val.shape}, Test: {x_test.shape}")
+    print(f"Using maximum time length: {max_time_length} samples ({max_time_length/sampling_rate:.2f} seconds)")
     
     # Create data dictionary
     data_dict = {
