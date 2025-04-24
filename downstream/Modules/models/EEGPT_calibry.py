@@ -5,76 +5,59 @@ import torch
 import pytorch_lightning as pl
 
 from ...utils_eval import get_metrics
-from .lora import add_lora_to_model, apply_lora_to_linear, make_lora_module_trainable
-from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint, EEGPTClassifier, partial, nn
+from .lora import add_lora_to_model
+from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint, partial, nn
 
 
-class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
+class EEGPTCalibry(pl.LightningModule):
     def __init__(self,
                  ch_names,
                  load_path="../checkpoint/eegpt_mcae_58chs_4s_large4E.ckp", 
-                 use_lora=False,
-                 lora_rank=8,
-                 lora_alpha=32,
-                 lora_dropout=0.1,
+                 num_classes=2,
                  max_lr=1e-3,
                  steps_per_epoch=100,
                  max_epochs=10,
-                 num_classes=2,
                  qkv_bias=True,
                  enc_drop_rate=0.0,
                  enc_attn_drop_rate=0.0,
                  enc_drop_path_rate=0.0,
-                 use_mean_pooling=False,
-                 use_chan_conv=False,
-                 max_norm_chan_conv=1,
-                 max_norm_head=1,
-                 rec_drop_rate=0.0,
-                 rec_attn_drop_rate=0.0,
-                 rec_drop_path_rate=0.0,
-                 use_freeze_encoder=False,
-                 use_freeze_reconstructor=False,
-                 interpolate_factor=2.0,
-                 desired_time_len=200*10,
-                 use_avg=False,
-                 use_predictor=False,
-                 use_out_proj=False,
-                 **kwargs
+                 use_lora=False,
+                 lora_rank=8,
+                 lora_alpha=32,
+                 lora_dropout=0.1,
                  ):
 
-        pl.LightningModule.__init__(self)
-        EEGPTClassifier.__init__(
-            self,
-            num_classes=num_classes,
-            in_channels=len(ch_names),
-            img_size=[len(ch_names), int(2.1*256)],
-            patch_stride=32,
-            use_channels_names=ch_names,
-            use_mean_pooling=use_mean_pooling,
-            use_chan_conv=use_chan_conv,
-            max_norm_chan_conv=max_norm_chan_conv,
-            max_norm_head=max_norm_head,
-            qkv_bias=qkv_bias,
-            enc_drop_rate=enc_drop_rate,
-            enc_attn_drop_rate=enc_attn_drop_rate,
-            enc_drop_path_rate=enc_drop_path_rate,
-            rec_drop_rate=rec_drop_rate,
-            rec_attn_drop_rate=rec_attn_drop_rate,
-            rec_drop_path_rate=rec_drop_path_rate,
-            use_freeze_encoder=use_freeze_encoder,
-            use_freeze_reconstructor=use_freeze_reconstructor,
-            interpolate_factor=interpolate_factor,
-            desired_time_len=desired_time_len,
-            use_avg=use_avg,
-            use_predictor=use_predictor,
-            use_out_proj=use_out_proj,
-            **kwargs
-        )
+        super().__init__()
         
         self.chans_num = len(ch_names)
+        self.num_classes = num_classes
         self.use_lora = use_lora
+        self.lora_params = None
+        
+        # Store hyperparameters
         self.save_hyperparameters()
         
+        # Create target encoder directly
+        self.target_encoder = EEGTransformer(
+            img_size=[self.chans_num, int(2.1*256)],
+            patch_size=32*2,
+            patch_stride=32,
+            embed_num=4,
+            embed_dim=512,
+            depth=8,
+            num_heads=8,
+            mlp_ratio=4.0,
+            drop_rate=enc_drop_rate,
+            attn_drop_rate=enc_attn_drop_rate,
+            drop_path_rate=enc_drop_path_rate,
+            init_std=0.02,
+            qkv_bias=qkv_bias,
+            norm_layer=partial(nn.LayerNorm, eps=1e-6)
+        )
+        
+        self.chan_ids = self.target_encoder.prepare_chan_ids(ch_names)
+        
+        # Load pretrained weights
         pretrain_ckpt = torch.load(load_path)
         target_encoder_stat = {}
         for k, v in pretrain_ckpt['state_dict'].items():
@@ -83,15 +66,18 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
                 
         self.target_encoder.load_state_dict(target_encoder_stat)
         
+        # Custom channel scaling 
         self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001*torch.rand((1, self.chans_num, 1)), requires_grad=True)
         
         # Freeze model params
         for param in self.target_encoder.parameters():
             param.requires_grad = False
             
+        # Custom linear probes 
         self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
-        self.linear_probe2 = LinearWithConstraint(240, 2, max_norm=0.25)
+        self.linear_probe2 = LinearWithConstraint(240, self.num_classes, max_norm=0.25)
         
+        # Add LoRA if requested
         if use_lora:
             self.target_encoder, self.lora_params = add_lora_to_model(
                 self.target_encoder, 
@@ -105,6 +91,7 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
         self.running_scores = {"train": [], "valid": [], "test": []}
         self.is_sanity = True
         
+        # Store optimization parameters
         self.max_lr = max_lr
         self.steps_per_epoch = steps_per_epoch
         self.max_epochs = max_epochs
@@ -112,12 +99,12 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
     def forward(self, x):
         x = x.to(torch.float)
         x = x - x.mean(dim=-2, keepdim=True)
-        x = x[:, self.chans_id, :]
+        x = x[:, self.chan_ids, :]
         x = x * self.chan_scale
 
         # Use eval mode for feature extraction but LoRA still works in eval mode
         self.target_encoder.eval()
-        z = self.target_encoder(x, self.chans_id.to(x))
+        z = self.target_encoder(x, self.chan_ids.to(x))
 
         h = z.flatten(2)
         h = self.linear_probe1(self.drop(h))
@@ -156,10 +143,10 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
                     module.lora.lora_A.data.copy_(lora_state_dict[f"{name}.lora.lora_A"])
                 if f"{name}.lora.lora_B" in lora_state_dict:
                     module.lora.lora_B.data.copy_(lora_state_dict[f"{name}.lora.lora_B"])
-
+    
     def on_train_epoch_start(self) -> None:
         self.running_scores["train"] = []
-        return pl.LightningModule.on_train_epoch_start(self)
+        return super().on_train_epoch_start()
 
     def on_train_epoch_end(self) -> None:
         label, y_score = [], []
@@ -170,14 +157,14 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
         y_score = torch.cat(y_score, dim=0)
         rocauc = metrics.roc_auc_score(label, y_score)
         self.log('train_rocauc', rocauc, on_epoch=True, on_step=False, sync_dist=True)
-        return pl.LightningModule.on_train_epoch_end(self)
+        return super().on_train_epoch_end()
 
     def training_step(self, batch, batch_idx):
         # training_step defined the train loop.
         # It is independent of forward
         x, y = batch
         label = y.long()
-
+        
         x, logit = self.forward(x)
         loss = self.loss_fn(logit, label)
         preds = torch.argmax(logit, dim=-1)
@@ -198,12 +185,12 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
 
     def on_validation_epoch_start(self) -> None:
         self.running_scores["valid"] = []
-        return pl.LightningModule.on_validation_epoch_start(self)
+        return super().on_validation_epoch_start()
 
     def on_validation_epoch_end(self) -> None:
         if self.is_sanity:
             self.is_sanity = False
-            return pl.LightningModule.on_validation_epoch_end(self)
+            return super().on_validation_epoch_end()
 
         label, y_score = [], []
         for x, y in self.running_scores["valid"]:
@@ -219,12 +206,12 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
         for key, value in results.items():
             self.log('valid_'+key, value, on_epoch=True, on_step=False, sync_dist=True)
 
-        return pl.LightningModule.on_validation_epoch_end(self)
+        return super().on_validation_epoch_end()
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         label = y.long()
-
+        
         x, logit = self.forward(x)
 
         preds = torch.argmax(logit, dim=-1)
@@ -244,7 +231,7 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
     def test_step(self, batch, batch_idx, *args: Any, **kwargs: Any):
         x, y = batch
         label = y.long()
-
+        
         x, logit = self.forward(x)
         loss = self.loss_fn(logit, label)
         preds = torch.argmax(logit, dim=-1)
