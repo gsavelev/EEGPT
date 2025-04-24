@@ -2,11 +2,14 @@ from typing import Any
 from sklearn import metrics
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from functools import partial
 import pytorch_lightning as pl
 
 from ...utils_eval import get_metrics
 from .lora import add_lora_to_model
-from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint, partial, nn
+from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint
 
 
 class EEGPTCalibry(pl.LightningModule):
@@ -26,7 +29,6 @@ class EEGPTCalibry(pl.LightningModule):
                  lora_alpha=32,
                  lora_dropout=0.1,
                  ):
-
         super().__init__()
         
         self.chans_num = len(ch_names)
@@ -143,7 +145,7 @@ class EEGPTCalibry(pl.LightningModule):
                     module.lora.lora_A.data.copy_(lora_state_dict[f"{name}.lora.lora_A"])
                 if f"{name}.lora.lora_B" in lora_state_dict:
                     module.lora.lora_B.data.copy_(lora_state_dict[f"{name}.lora.lora_B"])
-    
+
     def on_train_epoch_start(self) -> None:
         self.running_scores["train"] = []
         return super().on_train_epoch_start()
