@@ -41,44 +41,37 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
                  use_out_proj=False,
                  **kwargs
                  ):
-        # Initialize the LightningModule
-        pl.LightningModule.__init__(self)
+        # Change to use super() which proddperly handles method resolution order
+        super().__init__()
         
-        # Initialize basic parameters needed for EEGPTClassifier later
+        # Initialize basic parameters
         self.chans_num = len(ch_names)
         self.use_lora = use_lora
+        self.num_classes = num_classes  # Explicitly store num_classes
         
         # Store hyperparameters
         self.save_hyperparameters()
         
-        # Initialize the parent EEGPTClassifier with all parameters
-        EEGPTClassifier.__init__(
-            self,
-            num_classes=num_classes,
-            in_channels=self.chans_num,
+        # Now manually set up EEGPTClassifier components
+        # First create the target encoder
+        self.target_encoder = EEGTransformer(
             img_size=[self.chans_num, int(2.1*256)],
+            patch_size=32*2,
             patch_stride=32,
-            use_channels_names=ch_names,
-            use_mean_pooling=use_mean_pooling,
-            use_chan_conv=use_chan_conv,
-            max_norm_chan_conv=max_norm_chan_conv,
-            max_norm_head=max_norm_head,
+            embed_num=4,
+            embed_dim=512,
+            depth=8,
+            num_heads=8,
+            mlp_ratio=4.0,
+            drop_rate=enc_drop_rate,
+            attn_drop_rate=enc_attn_drop_rate,
+            drop_path_rate=enc_drop_path_rate,
+            init_std=0.02,
             qkv_bias=qkv_bias,
-            enc_drop_rate=enc_drop_rate,
-            enc_attn_drop_rate=enc_attn_drop_rate,
-            enc_drop_path_rate=enc_drop_path_rate,
-            rec_drop_rate=rec_drop_rate,
-            rec_attn_drop_rate=rec_attn_drop_rate,
-            rec_drop_path_rate=rec_drop_path_rate,
-            use_freeze_encoder=use_freeze_encoder,
-            use_freeze_reconstructor=use_freeze_reconstructor,
-            interpolate_factor=interpolate_factor,
-            desired_time_len=desired_time_len,
-            use_avg=use_avg,
-            use_predictor=use_predictor,
-            use_out_proj=use_out_proj,
-            **kwargs
+            norm_layer=partial(nn.LayerNorm, eps=1e-6)
         )
+        
+        self.chans_id = self.target_encoder.prepare_chan_ids(ch_names)
         
         # Load pretrained weights
         pretrain_ckpt = torch.load(load_path)
@@ -122,8 +115,7 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
     def forward(self, x):
         x = x.to(torch.float)
         x = x - x.mean(dim=-2, keepdim=True)
-        # Use the class's channels_index attribute
-        x = x[:, self.channels_index, :]
+        x = x[:, self.chans_id, :]
         x = x * self.chan_scale
 
         # Use eval mode for feature extraction but LoRA still works in eval mode
