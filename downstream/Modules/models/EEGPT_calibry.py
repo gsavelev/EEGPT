@@ -21,14 +21,14 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
                  steps_per_epoch=100,
                  max_epochs=10,
                  num_classes=2,
-                 use_mean_pooling=False,
-                 use_chan_conv=False,
-                 max_norm_chan_conv=1,
-                 max_norm_head=1,
                  qkv_bias=True,
                  enc_drop_rate=0.0,
                  enc_attn_drop_rate=0.0,
                  enc_drop_path_rate=0.0,
+                 use_mean_pooling=False,
+                 use_chan_conv=False,
+                 max_norm_chan_conv=1,
+                 max_norm_head=1,
                  rec_drop_rate=0.0,
                  rec_attn_drop_rate=0.0,
                  rec_drop_path_rate=0.0,
@@ -41,38 +41,40 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
                  use_out_proj=False,
                  **kwargs
                  ):
-        # Change to use super() which proddperly handles method resolution order
-        super().__init__(num_classes=num_classes)
-        
-        # Initialize basic parameters
-        self.chans_num = len(ch_names)
-        self.use_lora = use_lora
-        
-        # Store hyperparameters
-        self.save_hyperparameters()
-        
-        # Now manually set up EEGPTClassifier components
-        # First create the target encoder
-        self.target_encoder = EEGTransformer(
-            img_size=[self.chans_num, int(2.1*256)],
-            patch_size=32*2,
+
+        pl.LightningModule.__init__(self)
+        EEGPTClassifier.__init__(
+            self,
+            num_classes=num_classes,
+            in_channels=len(ch_names),
+            img_size=[len(ch_names), int(2.1*256)],
             patch_stride=32,
-            embed_num=4,
-            embed_dim=512,
-            depth=8,
-            num_heads=8,
-            mlp_ratio=4.0,
-            drop_rate=enc_drop_rate,
-            attn_drop_rate=enc_attn_drop_rate,
-            drop_path_rate=enc_drop_path_rate,
-            init_std=0.02,
+            use_channels_names=ch_names,
+            use_mean_pooling=use_mean_pooling,
+            use_chan_conv=use_chan_conv,
+            max_norm_chan_conv=max_norm_chan_conv,
+            max_norm_head=max_norm_head,
             qkv_bias=qkv_bias,
-            norm_layer=partial(nn.LayerNorm, eps=1e-6)
+            enc_drop_rate=enc_drop_rate,
+            enc_attn_drop_rate=enc_attn_drop_rate,
+            enc_drop_path_rate=enc_drop_path_rate,
+            rec_drop_rate=rec_drop_rate,
+            rec_attn_drop_rate=rec_attn_drop_rate,
+            rec_drop_path_rate=rec_drop_path_rate,
+            use_freeze_encoder=use_freeze_encoder,
+            use_freeze_reconstructor=use_freeze_reconstructor,
+            interpolate_factor=interpolate_factor,
+            desired_time_len=desired_time_len,
+            use_avg=use_avg,
+            use_predictor=use_predictor,
+            use_out_proj=use_out_proj,
+            **kwargs
         )
         
-        self.chans_id = self.target_encoder.prepare_chan_ids(ch_names)
+        self.chans_num = len(ch_names)
+        self.use_lora = use_lora
+        self.save_hyperparameters()
         
-        # Load pretrained weights
         pretrain_ckpt = torch.load(load_path)
         target_encoder_stat = {}
         for k, v in pretrain_ckpt['state_dict'].items():
@@ -81,18 +83,15 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
                 
         self.target_encoder.load_state_dict(target_encoder_stat)
         
-        # Override with custom components
         self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001*torch.rand((1, self.chans_num, 1)), requires_grad=True)
         
         # Freeze model params
         for param in self.target_encoder.parameters():
             param.requires_grad = False
             
-        # Custom linear probes
         self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
         self.linear_probe2 = LinearWithConstraint(240, 2, max_norm=0.25)
         
-        # Add LoRA if requested
         if use_lora:
             self.target_encoder, self.lora_params = add_lora_to_model(
                 self.target_encoder, 
@@ -106,7 +105,6 @@ class EEGPTCalibry(pl.LightningModule, EEGPTClassifier):
         self.running_scores = {"train": [], "valid": [], "test": []}
         self.is_sanity = True
         
-        # Store optimization parameters
         self.max_lr = max_lr
         self.steps_per_epoch = steps_per_epoch
         self.max_epochs = max_epochs
