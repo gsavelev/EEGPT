@@ -7,9 +7,9 @@ import torch.nn.functional as F
 from functools import partial
 import pytorch_lightning as pl
 
-from downstream.utils_eval import get_metrics
-from downstream.Modules.PEFT.lora import add_lora_to_model
-from downstream.Modules.models.EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint
+from utils_eval import get_metrics
+from PEFT.lora import add_lora_to_model
+from EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint
 
 
 class EEGPTCalibry(pl.LightningModule):
