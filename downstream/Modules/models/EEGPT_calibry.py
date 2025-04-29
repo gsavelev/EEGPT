@@ -24,7 +24,7 @@ class EEGPTCalibry(pl.LightningModule):
                  enc_drop_rate=0.0,
                  enc_attn_drop_rate=0.0,
                  enc_drop_path_rate=0.0,
-                 use_lora=False,
+                 use_lora=True,
                  lora_rank=8,
                  lora_alpha=32,
                  lora_dropout=0.1,
@@ -39,9 +39,9 @@ class EEGPTCalibry(pl.LightningModule):
         self.save_hyperparameters()
         
         self.target_encoder = EEGTransformer(
-            img_size=[self.chans_num, int(2.1*256)],
+            img_size=[self.chans_num, 256*4],
             patch_size=32*2,
-            patch_stride=32,
+            patch_stride=64,
             embed_num=4,
             embed_dim=512,
             depth=8,
@@ -54,18 +54,17 @@ class EEGPTCalibry(pl.LightningModule):
             qkv_bias=qkv_bias,
             norm_layer=partial(nn.LayerNorm, eps=1e-6)
         )
-        
+
         self.chan_ids = self.target_encoder.prepare_chan_ids(ch_names)
         
         pretrain_ckpt = torch.load(load_path)
+
         target_encoder_stat = {}
         for k, v in pretrain_ckpt['state_dict'].items():
             if k.startswith("target_encoder."):
-                target_encoder_stat[k[15:]] = v
+                target_encoder_stat[k[15:]] = v  # remove target_encoder. prefix
                 
         self.target_encoder.load_state_dict(target_encoder_stat)
-        
-        self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001*torch.rand((1, self.chans_num, 1)), requires_grad=True)
         
         # Freeze model params
         for param in self.target_encoder.parameters():
@@ -99,7 +98,6 @@ class EEGPTCalibry(pl.LightningModule):
         x = x.to(torch.float)
         x = x - x.mean(dim=-2, keepdim=True)
         x = x[:,self.chan_ids,:]
-        x = x * self.chan_scale
 
         self.target_encoder.eval()
         z = self.target_encoder(x, self.chan_ids.to(x))
@@ -237,8 +235,8 @@ class EEGPTCalibry(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        # Parameters to optimize: channel scale and linear probes plus LoRA params if used
-        params_to_optimize = [self.chan_scale] + list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
+        # Parameters to optimize: linear probes, LoRA params
+        params_to_optimize = list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
         
         if self.use_lora and self.lora_params:
             params_to_optimize.extend(self.lora_params)
