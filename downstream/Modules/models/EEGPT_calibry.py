@@ -56,15 +56,25 @@ class EEGPTCalibry(pl.LightningModule):
         )
 
         self.chan_ids = self.target_encoder.prepare_chan_ids(ch_names)
-        
+        print(f"[DEBUG] chan_ids shape: {getattr(self.chan_ids, 'shape', 'not a tensor')}")
+
         pretrain_ckpt = torch.load(load_path)
+        print(f"[DEBUG] Loaded pretrain_ckpt keys: {list(pretrain_ckpt.keys())}")
 
         target_encoder_stat = {}
         for k, v in pretrain_ckpt['state_dict'].items():
             if k.startswith("target_encoder."):
                 target_encoder_stat[k[15:]] = v  # remove target_encoder. prefix
-                
+                if hasattr(v, 'shape') and len(v.shape) == 5:
+                    print(f"[WARNING] 5D tensor found in checkpoint at key: {k}, shape: {v.shape}")
+
+        print(f"[DEBUG] Number of target_encoder_stat keys: {len(target_encoder_stat)}")
+        for k, v in target_encoder_stat.items():
+            if hasattr(v, 'shape') and len(v.shape) == 5:
+                print(f"[WARNING] 5D tensor in target_encoder_stat at key: {k}, shape: {v.shape}")
+
         self.target_encoder.load_state_dict(target_encoder_stat)
+        print(f"[DEBUG] target_encoder loaded state dict.")
         
         # Freeze model params
         for param in self.target_encoder.parameters():
