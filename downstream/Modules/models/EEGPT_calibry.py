@@ -57,7 +57,7 @@ class EEGPTCalibry(pl.LightningModule):
 
         self.chan_ids = self.target_encoder.prepare_chan_ids(ch_names)
         print(f"[DEBUG] chan_ids shape: {getattr(self.chan_ids, 'shape', 'not a tensor')}")
-
+        
         pretrain_ckpt = torch.load(load_path)
         print(f"[DEBUG] Loaded pretrain_ckpt keys: {list(pretrain_ckpt.keys())}")
 
