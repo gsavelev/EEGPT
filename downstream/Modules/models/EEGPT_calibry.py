@@ -93,6 +93,9 @@ class EEGPTCalibry(pl.LightningModule):
         self.max_epochs = max_epochs
 
     def forward(self, x):
+        # Squeeze all leading singleton dimensions except batch
+        while x.dim() > 3:
+            x = x.squeeze(1)
         B, C, T = x.shape
 
         x = x.to(torch.float)
