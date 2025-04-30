@@ -98,17 +98,14 @@ class EEGPTCalibry(pl.LightningModule):
         x = x.to(torch.float)
         x = x - x.mean(dim=-2, keepdim=True)
         x = x[:,self.chan_ids,:]
-        print(f"DEBUG | x shape is {x.shape}")
 
         self.target_encoder.eval()
         z = self.target_encoder(x, self.chan_ids.to(x))
-        print(f"DEBUG | z shape is {z.shape}")
 
         h = z.flatten(2)
         h = self.linear_probe1(self.drop(h))
         h = h.flatten(1)
         h = self.linear_probe2(h)
-        print(f"DEBUG | h shape is {h.shape}")
 
         return x, h
 
