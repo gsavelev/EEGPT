@@ -149,11 +149,11 @@ class EEGPTCalibry(pl.LightningModule):
         self.log('train_rocauc', rocauc, on_epoch=True, on_step=False, sync_dist=True)
         return super().on_train_epoch_end()
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch):
         x, y = batch
         label = y.long()
         
-        _, logit = self.forward(x)
+        x, logit = self.forward(x)
         loss = self.loss_fn(logit, label)
         preds = torch.argmax(logit, dim=-1)
         accuracy = ((preds==label)*1.0).mean()
@@ -196,7 +196,7 @@ class EEGPTCalibry(pl.LightningModule):
 
         return super().on_validation_epoch_end()
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch):
         x, y = batch
         label = y.long()
         
@@ -216,7 +216,7 @@ class EEGPTCalibry(pl.LightningModule):
 
         return loss
 
-    def test_step(self, batch, batch_idx, *args: Any, **kwargs: Any):
+    def test_step(self, batch):
         x, y = batch
         label = y.long()
         
@@ -237,7 +237,6 @@ class EEGPTCalibry(pl.LightningModule):
     def configure_optimizers(self):
         # Parameters to optimize: linear probes, LoRA params
         params_to_optimize = list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
-        
         if self.use_lora and self.lora_params:
             params_to_optimize.extend(self.lora_params)
         
