@@ -619,8 +619,6 @@ class EEGTransformer(nn.Module):
         # mask_t.shape mN
         
         # -- patchify x
-        # FIXME: bug in x shape - its B, 1, C, T 
-        x = x.squeeze()
         x = self.patch_embed(x)
         B, N, C, D = x.shape
         
