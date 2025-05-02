@@ -619,9 +619,9 @@ class EEGTransformer(nn.Module):
         # mask_t.shape mN
         
         # -- patchify x
-        # FIXME: bug happens here, prob. because of params or data
-        print(f"DEBUG | x shape in EEGTransformer forward: {x.shape}")
-        x = self.patch_embed(x) #
+        # FIXME: bug in x shape - its B, 1, C, T 
+        x = x.squeeze()
+        x = self.patch_embed(x)
         B, N, C, D = x.shape
         
         assert N==self.num_patches[1] and C==self.num_patches[0], f"{N}=={self.num_patches[1]} and {C}=={self.num_patches[0]}"

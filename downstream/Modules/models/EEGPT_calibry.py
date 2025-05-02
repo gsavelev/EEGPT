@@ -66,7 +66,12 @@ class EEGPTCalibry(pl.LightningModule):
         for k, v in pretrain_ckpt['state_dict'].items():
             if k.startswith("target_encoder."):
                 target_encoder_stat[k[15:]] = v  # remove target_encoder. prefix
+        
         self.target_encoder.load_state_dict(target_encoder_stat)
+
+        # Freeze model params
+        for param in self.target_encoder.parameters():
+             param.requires_grad = False
 
         self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001 * torch.rand((1, self.chans_num, 1)), requires_grad=True)
         self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
