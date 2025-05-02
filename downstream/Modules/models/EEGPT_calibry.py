@@ -100,7 +100,9 @@ class EEGPTCalibry(pl.LightningModule):
         x = x[:,self.chan_ids,:]
 
         self.target_encoder.eval()
-        z = self.target_encoder(x, self.chan_ids.to(x))
+        # TODO: save or change back
+        z = self.target_encoder(x, self.chan_ids)
+        # z = self.target_encoder(x, self.chan_ids.to(x))
 
         h = z.flatten(2)
         h = self.linear_probe1(self.drop(h))
