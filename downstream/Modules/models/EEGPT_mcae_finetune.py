@@ -296,6 +296,7 @@ class PatchEmbed(nn.Module):
     def forward(self, x):
         # x: B,C,T
         x = x.unsqueeze(1)# B, 1, C, T
+        # FIXME: bug happens here, prob. because of params or data
         x = self.proj(x).transpose(1,3) # B, T, C, D
         return x
 

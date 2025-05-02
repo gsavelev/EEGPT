@@ -65,11 +65,12 @@ class EEGPTCalibry(pl.LightningModule):
                 target_encoder_stat[k[15:]] = v  # remove target_encoder. prefix
                 
         self.target_encoder.load_state_dict(target_encoder_stat)
-        
+
         # Freeze model params
         for param in self.target_encoder.parameters():
             param.requires_grad = False
-            
+
+        self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001 * torch.rand((1, self.chans_num, 1)), requires_grad=True)
         self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
         self.linear_probe2 = LinearWithConstraint(240, self.num_classes, max_norm=0.25)
         
@@ -98,6 +99,7 @@ class EEGPTCalibry(pl.LightningModule):
         x = x.to(torch.float)
         x = x - x.mean(dim=-2, keepdim=True)
         x = x[:,self.chan_ids,:]
+        x = x * self.chan_scale
 
         self.target_encoder.eval()
         z = self.target_encoder(x, self.chan_ids.to(x))
@@ -235,8 +237,7 @@ class EEGPTCalibry(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        # Parameters to optimize: linear probes, LoRA params
-        params_to_optimize = list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
+        params_to_optimize = list(self.chan_scale + self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
         if self.use_lora and self.lora_params:
             params_to_optimize.extend(self.lora_params)
         
