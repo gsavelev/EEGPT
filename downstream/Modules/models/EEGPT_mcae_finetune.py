@@ -619,7 +619,7 @@ class EEGTransformer(nn.Module):
         # mask_t.shape mN
         
         # -- patchify x
-        x = self.patch_embed(x)
+        x = self.patch_embed(x.squeeze())
         B, N, C, D = x.shape
         
         assert N==self.num_patches[1] and C==self.num_patches[0], f"{N}=={self.num_patches[1]} and {C}=={self.num_patches[0]}"
