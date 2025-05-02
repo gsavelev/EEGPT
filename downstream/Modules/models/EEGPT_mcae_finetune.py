@@ -581,9 +581,7 @@ class EEGTransformer(nn.Module):
             ch = ch.upper().strip('.')
             assert ch in CHANNEL_DICT, ch
             chan_ids.append(CHANNEL_DICT[ch])
-        # TODO: choose one return
-        return chan_ids
-        # return torch.tensor(chan_ids).unsqueeze_(0).long()
+        return torch.tensor(chan_ids).unsqueeze_(0).long()
     
     def fix_init_weight(self):
         def rescale(param, layer_id):
