@@ -35,6 +35,9 @@ class EEGPTCalibry(pl.LightningModule):
         self.num_classes = num_classes
         self.use_lora = use_lora
         self.lora_params = None
+        self.max_lr = max_lr
+        self.steps_per_epoch = steps_per_epoch
+        self.max_epochs = max_epochs
         
         self.save_hyperparameters()
         
@@ -63,12 +66,7 @@ class EEGPTCalibry(pl.LightningModule):
         for k, v in pretrain_ckpt['state_dict'].items():
             if k.startswith("target_encoder."):
                 target_encoder_stat[k[15:]] = v  # remove target_encoder. prefix
-                
         self.target_encoder.load_state_dict(target_encoder_stat)
-
-        # Freeze model params
-        for param in self.target_encoder.parameters():
-            param.requires_grad = False
 
         self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001 * torch.rand((1, self.chans_num, 1)), requires_grad=True)
         self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
@@ -87,11 +85,6 @@ class EEGPTCalibry(pl.LightningModule):
         self.loss_fn = torch.nn.CrossEntropyLoss()
         self.running_scores = {"train": [], "valid": [], "test": []}
         self.is_sanity = True
-        
-        # Store optimization parameters
-        self.max_lr = max_lr
-        self.steps_per_epoch = steps_per_epoch
-        self.max_epochs = max_epochs
 
     def forward(self, x):
         B, C, T = x.shape
