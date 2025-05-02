@@ -230,7 +230,7 @@ class EEGPTCalibry(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        params_to_optimize = list(self.chan_scale) + list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
+        params_to_optimize = [self.chan_scale] + list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
         if self.use_lora and self.lora_params:
             params_to_optimize.extend(self.lora_params)
         
