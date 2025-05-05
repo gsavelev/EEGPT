@@ -7,8 +7,10 @@ import torch.nn.functional as F
 from functools import partial
 import pytorch_lightning as pl
 
-from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint
+from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint, Conv1dWithConstraint
 from ..PEFT.lora import add_lora_to_model
+from ..Transformers.pos_embed import create_1d_absolute_sin_cos_embedding
+from ...utils import temporal_interpolation
 from ...utils_eval import get_metrics
 
 
@@ -72,9 +74,15 @@ class EEGPTCalibry(pl.LightningModule):
         for param in self.target_encoder.parameters():
              param.requires_grad = False
 
-        self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001 * torch.rand((1, self.chans_num, 1)), requires_grad=True)
-        self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
-        self.linear_probe2 = LinearWithConstraint(240, self.num_classes, max_norm=0.25)
+        self.decoder = torch.nn.TransformerDecoder(
+             decoder_layer=torch.nn.TransformerDecoderLayer(
+                 64, 4, 64*4, activation=torch.nn.functional.gelu, batch_first=False), num_layers=4
+         )
+        self.chan_conv = Conv1dWithConstraint(2, self.chans_num, 1, max_norm=1)
+        # self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001 * torch.rand((1, self.chans_num, 1)), requires_grad=True)
+        self.linear_probe1 = LinearWithConstraint(2048, 64, max_norm=1)
+        self.linear_probe2 = LinearWithConstraint(64, self.num_classes, max_norm=0.25)
+        self.cls_token = torch.nn.Parameter(torch.rand(1, 1, 64) * 0.001, requires_grad=True)
         
         # Add LoRA if requested
         if use_lora:
@@ -93,17 +101,19 @@ class EEGPTCalibry(pl.LightningModule):
     def forward(self, x):
         B, C, T = x.shape
 
-        x = x.to(torch.float)
-        x = x - x.mean(dim=-2, keepdim=True)
-        x = x[:,self.chan_ids,:]
-        x = x * self.chan_scale
+        x = temporal_interpolation(x, 256*30)
+        x = self.chan_conv(x)
 
         self.target_encoder.eval()
-        z = self.target_encoder(x, self.chan_ids.to(x))
-
+        z = self.target_encoder(x, self.chans_id.to(x))
+        
         h = z.flatten(2)
         h = self.linear_probe1(self.drop(h))
-        h = h.flatten(1)
+        pos = create_1d_absolute_sin_cos_embedding(h.shape[1], dim=64)
+        h = h + pos.repeat((h.shape[0], 1, 1)).to(h)
+        h = torch.cat([self.cls_token.repeat((h.shape[0], 1, 1)).to(h.device), h], dim=1)
+        h = h.transpose(0, 1)
+        h = self.decoder(h, h)[0,:,:]
         h = self.linear_probe2(h)
 
         return x, h
@@ -234,7 +244,16 @@ class EEGPTCalibry(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        params_to_optimize = [self.chan_scale] + list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
+        # params_to_optimize = [self.chan_scale] + list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
+        # params_to_optimize = list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
+        params_to_optimize = list(self.chan_conv.parameters()) + \
+                             list(self.linear_probe1.parameters()) + \
+                             list(self.linear_probe2.parameters()) + \
+                             [self.cls_token] + \
+                             list(self.decoder.parameters())
+
+        optimizer = torch.optim.AdamW(params_to_optimize, weight_decay=0.01)
+            
         if self.use_lora and self.lora_params:
             params_to_optimize.extend(self.lora_params)
         
