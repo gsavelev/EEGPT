@@ -73,15 +73,9 @@ class EEGPTCalibry(pl.LightningModule):
         for param in self.target_encoder.parameters():
              param.requires_grad = False
 
-        self.decoder = torch.nn.TransformerDecoder(
-             decoder_layer=torch.nn.TransformerDecoderLayer(
-                 64, 4, 64*4, activation=torch.nn.functional.gelu, batch_first=False), num_layers=4
-         )
         self.chan_conv = Conv1dWithConstraint(2, self.chans_num, 1, max_norm=1)
-        # self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001 * torch.rand((1, self.chans_num, 1)), requires_grad=True)
         self.linear_probe1 = LinearWithConstraint(2048, 64, max_norm=1)
         self.linear_probe2 = LinearWithConstraint(64, self.num_classes, max_norm=0.25)
-        self.cls_token = torch.nn.Parameter(torch.rand(1, 1, 64) * 0.001, requires_grad=True)
         
         # Add LoRA if requested
         if use_lora:
@@ -122,11 +116,7 @@ class EEGPTCalibry(pl.LightningModule):
         
         h = z.flatten(2)
         h = self.linear_probe1(self.drop(h))
-        pos = create_1d_absolute_sin_cos_embedding(h.shape[1], dim=64)
-        h = h + pos.repeat((h.shape[0], 1, 1)).to(h)
-        h = torch.cat([self.cls_token.repeat((h.shape[0], 1, 1)).to(h.device), h], dim=1)
-        h = h.transpose(0, 1)
-        h = self.decoder(h, h)[0, :, :]
+        h = h.flatten(1)
         h = self.linear_probe2(h)
 
         return x, h
@@ -257,13 +247,9 @@ class EEGPTCalibry(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        # params_to_optimize = [self.chan_scale] + list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
-        # params_to_optimize = list(self.linear_probe1.parameters()) + list(self.linear_probe2.parameters())
         params_to_optimize = list(self.chan_conv.parameters()) + \
                              list(self.linear_probe1.parameters()) + \
-                             list(self.linear_probe2.parameters()) + \
-                             [self.cls_token] + \
-                             list(self.decoder.parameters())
+                             list(self.linear_probe2.parameters())
 
         optimizer = torch.optim.AdamW(params_to_optimize, weight_decay=0.01)
             
