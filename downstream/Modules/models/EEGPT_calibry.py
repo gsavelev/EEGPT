@@ -126,7 +126,7 @@ class EEGPTCalibry(pl.LightningModule):
         h = h + pos.repeat((h.shape[0], 1, 1)).to(h)
         h = torch.cat([self.cls_token.repeat((h.shape[0], 1, 1)).to(h.device), h], dim=1)
         h = h.transpose(0, 1)
-        h = self.decoder(h, h)[0,:,:]
+        h = self.decoder(h, h)[0, :, :]
         h = self.linear_probe2(h)
 
         return x, h
