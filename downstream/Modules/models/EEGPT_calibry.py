@@ -91,6 +91,7 @@ class EEGPTCalibry(pl.LightningModule):
         self.is_sanity = True
 
     # TODO: import it if success
+    @staticmethod
     def temporal_interpolation(x, desired_sequence_length, mode='nearest', use_avg=True):
         # print(x.shape)
         # squeeze and unsqueeze because these are done before batching
