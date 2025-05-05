@@ -14,7 +14,7 @@ import copy
 import gc
 
 import scipy
-from downstream.Data_process.utils import EA
+from Data_process.utils import EA
 
 from torch.utils.data import Dataset,DataLoader
 

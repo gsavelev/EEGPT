@@ -10,7 +10,6 @@ import pytorch_lightning as pl
 from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint, Conv1dWithConstraint
 from ..PEFT.lora import add_lora_to_model
 from ..Transformers.pos_embed import create_1d_absolute_sin_cos_embedding
-from ...utils import temporal_interpolation
 from ...utils_eval import get_metrics
 
 
@@ -98,10 +97,24 @@ class EEGPTCalibry(pl.LightningModule):
         self.running_scores = {"train": [], "valid": [], "test": []}
         self.is_sanity = True
 
+    @staticmethod
+    def temporal_interpolation(x, desired_sequence_length, mode='nearest', use_avg=True):
+        # print(x.shape)
+        # squeeze and unsqueeze because these are done before batching
+        if use_avg:
+            x = x - torch.mean(x, dim=-2, keepdim=True)
+        if len(x.shape) == 2:
+            return torch.nn.functional.interpolate(x.unsqueeze(0), desired_sequence_length, mode=mode).squeeze(0)
+        # Supports batch dimension
+        elif len(x.shape) == 3:
+            return torch.nn.functional.interpolate(x, desired_sequence_length, mode=mode)
+        else:
+            raise ValueError("TemporalInterpolation only support sequence of single dim channels with optional batch")
+
     def forward(self, x):
         B, C, T = x.shape
 
-        x = temporal_interpolation(x, 256*30)
+        x = self.temporal_interpolation(x, 256*30)
         x = self.chan_conv(x)
 
         self.target_encoder.eval()
