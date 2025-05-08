@@ -42,8 +42,8 @@ class EEGPTCalibry(pl.LightningModule):
         self.save_hyperparameters()
         
         self.target_encoder = EEGTransformer(
-            img_size=[self.chans_num, 2944],
-            patch_size=32*2,
+            img_size=[self.chans_num, 60*50],
+            patch_size=60,
             embed_num=4,
             embed_dim=512,
             depth=8,
