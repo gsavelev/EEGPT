@@ -42,8 +42,8 @@ class EEGPTCalibry(pl.LightningModule):
         self.save_hyperparameters()
         
         self.target_encoder = EEGTransformer(
-            img_size=[self.chans_num, 60*50],
-            patch_size=60,
+            img_size=[self.chans_num, 256*30],
+            patch_size=64,
             embed_num=4,
             embed_dim=512,
             depth=8,
@@ -74,7 +74,7 @@ class EEGPTCalibry(pl.LightningModule):
 
         self.chan_conv = Conv1dWithConstraint(2, self.chans_num, 1, max_norm=1)
         self.linear_probe1 = LinearWithConstraint(2048, 64, max_norm=1)
-        self.linear_probe2 = LinearWithConstraint(64, self.num_classes, max_norm=0.25)
+        self.linear_probe2 = LinearWithConstraint(2944, self.num_classes, max_norm=0.25)
         
         # Add LoRA if requested
         if use_lora:
