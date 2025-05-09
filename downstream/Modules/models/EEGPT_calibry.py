@@ -218,9 +218,12 @@ class EEGPTCalibry(pl.LightningModule):
         accuracy = ((preds==label)*1.0).mean()
 
         loss = self.loss_fn(logit, label)
-        y_score = logit
-        y_score = torch.softmax(y_score, dim=-1)[:,1]
-        self.running_scores["valid"].append((label.clone().detach().cpu(), y_score.clone().detach().cpu()))
+
+        if self.is_binary:
+            y_score = torch.softmax(logit, dim=-1)[:,1]
+            self.running_scores["valid"].append((label.clone().detach().cpu(), y_score.clone().detach().cpu()))
+        else:
+            self.running_scores["valid"].append((label.clone().detach().cpu(), logit.clone().detach().cpu()))
 
         # Logging to TensorBoard by default
         self.log('valid_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
