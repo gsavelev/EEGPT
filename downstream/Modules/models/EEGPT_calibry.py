@@ -17,7 +17,7 @@ class EEGPTCalibry(pl.LightningModule):
                  ch_names,
                  load_path="../checkpoint/eegpt_mcae_58chs_4s_large4E.ckp", 
                  num_classes=2,
-                 timepoints=3000,
+                 timepoints=256,
                  lp2_0_dim=240,
                  max_lr=1e-3,
                  steps_per_epoch=100,
@@ -34,9 +34,9 @@ class EEGPTCalibry(pl.LightningModule):
         super().__init__()
         
         self.chans_num = len(ch_names)
-        self.timepoints = timepoints
         self.num_classes = num_classes
         self.is_binary = (self.num_classes == 2)
+        self.timepoints = timepoints
         self.lp2_0_dim = lp2_0_dim
         self.use_lora = use_lora
         self.lora_params = None
