@@ -17,6 +17,8 @@ class EEGPTCalibry(pl.LightningModule):
                  ch_names,
                  load_path="../checkpoint/eegpt_mcae_58chs_4s_large4E.ckp", 
                  num_classes=2,
+                 timepoints=3000,
+                 lp2_0_dim=240,
                  max_lr=1e-3,
                  steps_per_epoch=100,
                  max_epochs=10,
@@ -32,7 +34,10 @@ class EEGPTCalibry(pl.LightningModule):
         super().__init__()
         
         self.chans_num = len(ch_names)
+        self.timepoints = timepoints
         self.num_classes = num_classes
+        self.is_binary = (self.num_classes == 2)
+        self.lp2_0_dim = lp2_0_dim
         self.use_lora = use_lora
         self.lora_params = None
         self.max_lr = max_lr
@@ -42,7 +47,7 @@ class EEGPTCalibry(pl.LightningModule):
         self.save_hyperparameters()
         
         self.target_encoder = EEGTransformer(
-            img_size=[self.chans_num, 3000],
+            img_size=[self.chans_num, self.timepoints],
             patch_size=64,
             embed_num=4,
             embed_dim=512,
@@ -64,7 +69,7 @@ class EEGPTCalibry(pl.LightningModule):
         target_encoder_stat = {}
         for k, v in pretrain_ckpt['state_dict'].items():
             if k.startswith("target_encoder."):
-                target_encoder_stat[k[15:]] = v  # remove target_encoder. prefix
+                target_encoder_stat[k[15:]] = v  # Remove 'target_encoder.' prefix
         
         self.target_encoder.load_state_dict(target_encoder_stat)
 
@@ -73,8 +78,8 @@ class EEGPTCalibry(pl.LightningModule):
              param.requires_grad = False
 
         self.chan_conv = Conv1dWithConstraint(2, self.chans_num, 1, max_norm=1)
-        self.linear_probe1 = LinearWithConstraint(2048, 64, max_norm=1)
-        self.linear_probe2 = LinearWithConstraint(2944, self.num_classes, max_norm=0.25)
+        self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
+        self.linear_probe2 = LinearWithConstraint(self.lp2_0_dim, self.num_classes, max_norm=0.25)
         
         # Add LoRA if requested
         if use_lora:
@@ -182,7 +187,7 @@ class EEGPTCalibry(pl.LightningModule):
         y_score = torch.cat(y_score, dim=0)
 
         metrics_list = ["accuracy", "balanced_accuracy", "precision", "recall", "cohen_kappa", "f1", "roc_auc"]
-        results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics_list, True)
+        results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics_list, is_binary=self.is_binary)
 
         for key, value in results.items():
             self.log('valid_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
