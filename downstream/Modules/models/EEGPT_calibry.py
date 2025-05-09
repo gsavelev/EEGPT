@@ -19,6 +19,7 @@ class EEGPTCalibry(pl.LightningModule):
                  num_classes=2,
                  timepoints=256,
                  lp2_0_dim=240,
+                 use_chan_scale=False,
                  max_lr=1e-3,
                  steps_per_epoch=100,
                  max_epochs=10,
@@ -38,6 +39,7 @@ class EEGPTCalibry(pl.LightningModule):
         self.is_binary = (self.num_classes == 2)
         self.timepoints = timepoints
         self.lp2_0_dim = lp2_0_dim
+        self.use_chan_scale = use_chan_scale
         self.use_lora = use_lora
         self.lora_params = None
         self.max_lr = max_lr
@@ -73,10 +75,12 @@ class EEGPTCalibry(pl.LightningModule):
         
         self.target_encoder.load_state_dict(target_encoder_stat)
 
-        # Freeze model params
+        # Freeze model's params
         for param in self.target_encoder.parameters():
              param.requires_grad = False
 
+        # Layers
+        self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1) + 0.001 * torch.rand((1, self.chans_num, 1)), requires_grad=True)
         self.chan_conv = Conv1dWithConstraint(2, self.chans_num, 1, max_norm=1)
         self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
         self.linear_probe2 = LinearWithConstraint(self.lp2_0_dim, self.num_classes, max_norm=0.25)
@@ -90,16 +94,26 @@ class EEGPTCalibry(pl.LightningModule):
                 dropout=lora_dropout
             )
             
+        # Misc params
         self.drop = torch.nn.Dropout(p=0.50)
         self.loss_fn = torch.nn.CrossEntropyLoss()
         self.running_scores = {"train": [], "valid": [], "test": []}
         self.is_sanity = True
 
     def forward(self, x):
-        # B, C, T = x.shape
-        x = self.chan_conv(x)
+        B, C, T = x.shape
+
+        if self.use_chan_scale:
+            x = x.to(torch.float)
+            x = x - x.mean(dim=-2, keepdim=True)
+            x = x[:, self.chan_ids, :]
+            x = x * self.chan_scale
+        else:
+            x = self.chan_conv(x)
+
         self.target_encoder.eval()
         z = self.target_encoder(x, self.chan_ids.to(x))
+
         h = z.flatten(2)
         h = self.linear_probe1(self.drop(h))
         h = h.flatten(1)
