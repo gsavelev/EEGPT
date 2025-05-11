@@ -202,7 +202,10 @@ class EEGPTCalibry(pl.LightningModule):
         label = torch.cat(label, dim=0)
         y_score = torch.cat(y_score, dim=0)
 
-        metrics_list = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1", "roc_auc"]
+        metrics_list = ["accuracy", "balanced_accuracy", "cohen_kappa", "roc_auc"]
+        if self.is_binary:
+            metrics_list.extend(["precision", "recall", "f1"])
+
         results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics_list, is_binary=self.is_binary)
 
         for key, value in results.items():
