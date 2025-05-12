@@ -147,19 +147,7 @@ class EEGPTCalibry(pl.LightningModule):
                     module.lora.lora_B.data.copy_(lora_state_dict[f"{name}.lora.lora_B"])
 
     def on_train_epoch_start(self) -> None:
-        self.running_scores["train"] = []
         return super().on_train_epoch_start()
-
-    def on_train_epoch_end(self) -> None:
-        label, y_score = [], []
-        for x, y in self.running_scores["train"]:
-            label.append(x)
-            y_score.append(y)
-        label = torch.cat(label, dim=0)
-        y_score = torch.cat(y_score, dim=0)
-        rocauc = metrics.roc_auc_score(label, y_score)
-        self.log('train_rocauc', rocauc, on_epoch=True, on_step=False, sync_dist=True)
-        return super().on_train_epoch_end()
 
     def training_step(self, batch):
         x, y = batch
@@ -172,7 +160,7 @@ class EEGPTCalibry(pl.LightningModule):
         accuracy = ((preds==label)*1.0).mean()
 
         if self.is_binary:
-            y_score = torch.softmax(logit, dim=-1)[:,1]
+            y_score =  torch.softmax(logit, dim=-1)[:,1]
             self.running_scores["train"].append((label.clone().detach().cpu(), y_score.clone().detach().cpu()))
 
         # Logging to TensorBoard by default
@@ -185,33 +173,20 @@ class EEGPTCalibry(pl.LightningModule):
 
         return loss
 
-    def on_validation_epoch_start(self) -> None:
-        self.running_scores["valid"] = []
-        return super().on_validation_epoch_start()
-
-    def on_validation_epoch_end(self) -> None:
-        if self.is_sanity:
-            self.is_sanity = False
-            return super().on_validation_epoch_end()
-
-        label, y_score = [], []
-        for x, y in self.running_scores["valid"]:
-            label.append(x)
-            y_score.append(y)
-
-        label = torch.cat(label, dim=0)
-        y_score = torch.cat(y_score, dim=0)
-
-        metrics_list = ["accuracy", "balanced_accuracy", "cohen_kappa"]
+    def on_train_epoch_end(self) -> None:
         if self.is_binary:
-            metrics_list.extend(["precision", "recall", "f1", "roc_auc"])
+            label, y_score = [], []
+            for x, y in self.running_scores["train"]:
+                label.append(x)
+                y_score.append(y)
+            label = torch.cat(label, dim=0)
+            y_score = torch.cat(y_score, dim=0)
+            rocauc = metrics.roc_auc_score(label, y_score)
+            self.log('train_rocauc', rocauc, on_epoch=True, on_step=False, sync_dist=True)
+        return super().on_train_epoch_end()
 
-        results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics_list, is_binary=self.is_binary)
-
-        for key, value in results.items():
-            self.log('valid_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
-
-        return super().on_validation_epoch_end()
+    def on_validation_epoch_start(self) -> None:
+        return super().on_validation_epoch_start()
 
     def validation_step(self, batch):
         x, y = batch
@@ -236,28 +211,82 @@ class EEGPTCalibry(pl.LightningModule):
 
         return loss
 
+    def on_validation_epoch_end(self) -> None:
+        if self.is_sanity:
+            self.is_sanity = False
+            return super().on_validation_epoch_end()
+
+        label, y_score = [], []
+        for x, y in self.running_scores["valid"]:
+            label.append(x)
+            y_score.append(y)
+
+        label = torch.cat(label, dim=0)
+        y_score = torch.cat(y_score, dim=0)
+
+        metrics_list = ["accuracy", "balanced_accuracy", "cohen_kappa"]
+        if self.is_binary:
+            metrics_list.extend(["precision", "recall", "f1", "roc_auc"])
+        else:
+            metrics_list.extend(["f1_weighted", "f1_macro", "f1_micro"])
+
+        results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics_list, is_binary=self.is_binary)
+
+        for key, value in results.items():
+            self.log('valid_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
+
+        return super().on_validation_epoch_end()
+                             
+    def on_test_epoch_start(self) -> None:
+        return super().on_test_epoch_start()
+
     def test_step(self, batch):
         x, y = batch
         label = y.long()
         
         _, logit = self.forward(x)
+
         loss = self.loss_fn(logit, label)
-        preds = torch.argmax(logit, dim=-1)
-        accuracy = ((preds==label)*1.0).mean()
-        y_score = logit
-        y_score = torch.softmax(y_score, dim=-1)[:,1]
-        self.running_scores["test"].append((label.clone().detach().cpu(), y_score.clone().detach().cpu()))
-        
-        # Logging to TensorBoard by default
-        self.log('test_loss', loss, on_epoch=True, on_step=False)
-        self.log('test_acc', accuracy, on_epoch=True, on_step=False)
+
+        if self.is_binary:
+            y_score = torch.softmax(logit, dim=-1)[:,1]
+            self.running_scores["test"].append((label.clone().detach().cpu(), y_score.clone().detach().cpu()))
+        else:
+            self.running_scores["test"].append((label.clone().detach().cpu(), logit.clone().detach().cpu()))
 
         return loss
 
+    # TODO: calc all valid metrics
+    def on_test_epoch_end(self) -> None:
+        label, y_score = [], []
+        for x, y in self.running_scores["test"]:
+            label.append(x)
+            y_score.append(y)
+
+        label = torch.cat(label, dim=0)
+        y_score = torch.cat(y_score, dim=0)
+
+        metrics_list = ["accuracy", "balanced_accuracy", "cohen_kappa"]
+        if self.is_binary:
+            metrics_list.extend(["precision", "recall", "f1", "roc_auc"])
+        else:
+            metrics_list.extend(["f1_weighted", "f1_macro", "f1_micro"])
+
+        results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics_list, is_binary=self.is_binary)
+
+        for key, value in results.items():
+            self.log('test_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
+
+        return super().on_test_epoch_end()
+
     def configure_optimizers(self):
-        params_to_optimize = list(self.chan_conv.parameters()) + \
-                             list(self.linear_probe1.parameters()) + \
+        params_to_optimize = list(self.linear_probe1.parameters()) + \
                              list(self.linear_probe2.parameters())
+
+        if self.use_chan_scale:
+            params_to_optimize.extend(self.chan_scale.parameters())
+        else:
+            params_to_optimize.extend(self.chan_conv.parameters())
 
         optimizer = torch.optim.AdamW(params_to_optimize, weight_decay=0.01)
             
