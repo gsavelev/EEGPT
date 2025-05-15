@@ -283,7 +283,7 @@ class EEGPTCalibry(pl.LightningModule):
                              list(self.linear_probe2.parameters())
 
         if self.use_chan_scale:
-            params_to_optimize.extend(list(self.chan_scale))
+            params_to_optimize.extend([self.chan_scale])
         else:
             params_to_optimize.extend(self.chan_conv.parameters())
 
