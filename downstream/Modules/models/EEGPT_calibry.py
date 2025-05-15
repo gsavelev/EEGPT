@@ -256,7 +256,6 @@ class EEGPTCalibry(pl.LightningModule):
 
         return loss
 
-    # TODO: calc all valid metrics
     def on_test_epoch_end(self) -> None:
         label, y_score = [], []
         for x, y in self.running_scores["test"]:
@@ -284,7 +283,7 @@ class EEGPTCalibry(pl.LightningModule):
                              list(self.linear_probe2.parameters())
 
         if self.use_chan_scale:
-            params_to_optimize.extend(self.chan_scale.parameters())
+            params_to_optimize.extend(self.chan_scale)
         else:
             params_to_optimize.extend(self.chan_conv.parameters())
 
