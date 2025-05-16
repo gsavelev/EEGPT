@@ -300,8 +300,7 @@ class EEGPTCalibry(pl.LightningModule):
         lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer, 
             max_lr=self.max_lr, 
-            steps_per_epoch=self.steps_per_epoch, 
-            epochs=self.max_epochs, 
+            total_steps=self.steps_per_epoch * self.max_epochs,
             pct_start=0.2
         )
         
