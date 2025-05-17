@@ -294,12 +294,23 @@ class EEGPTCalibry(pl.LightningModule):
 
         # Calculate confidence intervals (95%)
         confidence_intervals = {}
+        plus_minus_metrics = {}
         for metric in metrics_list:
             values = np.array(bootstrap_results[metric])
+            mean_value = results[metric]
+            std_value = np.std(values)
             ci_lower = np.percentile(values, 2.5)
             ci_upper = np.percentile(values, 97.5)
+            
+            # Store confidence intervals
             confidence_intervals[f"{metric}_ci_lower"] = ci_lower
             confidence_intervals[f"{metric}_ci_upper"] = ci_upper
+            
+            # Calculate plus-minus format (mean ± std)
+            plus_minus_metrics[f"{metric}_pm"] = f"{mean_value:.3f} ± {std_value:.3f}"
+            
+            # Calculate plus-minus format with confidence intervals
+            plus_minus_metrics[f"{metric}_pm_ci"] = f"{mean_value:.3f} ({ci_lower:.3f}-{ci_upper:.3f})"
 
         # Log regular metrics
         for key, value in results.items():
@@ -307,6 +318,10 @@ class EEGPTCalibry(pl.LightningModule):
             
         # Log confidence intervals
         for key, value in confidence_intervals.items():
+            self.log('test_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
+            
+        # Log plus-minus metrics
+        for key, value in plus_minus_metrics.items():
             self.log('test_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
 
         return super().on_test_epoch_end()
