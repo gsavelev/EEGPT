@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from functools import partial
 import pytorch_lightning as pl
+import numpy as np
 
 from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint, Conv1dWithConstraint
 from ..PEFT.lora import add_lora_to_model
@@ -271,9 +272,41 @@ class EEGPTCalibry(pl.LightningModule):
         else:
             metrics_list.extend(["f1_weighted", "f1_macro", "f1_micro"])
 
+        # Calculate regular metrics
         results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics_list, is_binary=self.is_binary)
 
+        # Calculate confidence intervals using bootstrapping
+        n_bootstrap = 1000
+        bootstrap_results = {metric: [] for metric in metrics_list}
+        
+        for _ in range(n_bootstrap):
+            # Generate bootstrap indices
+            indices = np.random.randint(0, len(label), size=len(label))
+            bootstrap_y_score = y_score[indices].cpu().numpy()
+            bootstrap_label = label[indices].cpu().numpy()
+            
+            # Calculate metrics for this bootstrap sample
+            bootstrap_metrics = get_metrics(bootstrap_y_score, bootstrap_label, metrics_list, is_binary=self.is_binary)
+            
+            # Store results
+            for metric in metrics_list:
+                bootstrap_results[metric].append(bootstrap_metrics[metric])
+
+        # Calculate confidence intervals (95%)
+        confidence_intervals = {}
+        for metric in metrics_list:
+            values = np.array(bootstrap_results[metric])
+            ci_lower = np.percentile(values, 2.5)
+            ci_upper = np.percentile(values, 97.5)
+            confidence_intervals[f"{metric}_ci_lower"] = ci_lower
+            confidence_intervals[f"{metric}_ci_upper"] = ci_upper
+
+        # Log regular metrics
         for key, value in results.items():
+            self.log('test_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
+            
+        # Log confidence intervals
+        for key, value in confidence_intervals.items():
             self.log('test_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
 
         return super().on_test_epoch_end()
