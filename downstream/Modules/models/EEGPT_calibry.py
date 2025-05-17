@@ -46,6 +46,7 @@ class EEGPTCalibry(pl.LightningModule):
         self.max_lr = max_lr
         self.steps_per_epoch = steps_per_epoch
         self.max_epochs = max_epochs
+        self.metric_strings = {}  # Store string representations of metrics
         
         self.save_hyperparameters()
         
@@ -312,6 +313,8 @@ class EEGPTCalibry(pl.LightningModule):
         for key, value in metrics_with_one_std.items():
             self.log(key, value, on_epoch=True, on_step=False, sync_dist=True)
             
+        self.metric_strings = metrics_with_one_std
+
         return super().on_test_epoch_end()
 
     def configure_optimizers(self):
