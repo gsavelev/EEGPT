@@ -46,6 +46,7 @@ class EEGPTCalibry(pl.LightningModule):
         self.max_lr = max_lr
         self.steps_per_epoch = steps_per_epoch
         self.max_epochs = max_epochs
+        self.metric_strings = {}  # Store string representations of metrics
         
         self.save_hyperparameters()
         
@@ -272,7 +273,6 @@ class EEGPTCalibry(pl.LightningModule):
         else:
             metrics_list.extend(["f1_weighted", "f1_macro", "f1_micro"])
 
-        # Calculate regular metrics
         results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics_list, is_binary=self.is_binary)
 
         # Calculate confidence intervals using bootstrapping
@@ -280,21 +280,18 @@ class EEGPTCalibry(pl.LightningModule):
         bootstrap_results = {metric: [] for metric in metrics_list}
         
         for _ in range(n_bootstrap):
-            # Generate bootstrap indices
             indices = np.random.randint(0, len(label), size=len(label))
             bootstrap_y_score = y_score[indices].cpu().numpy()
             bootstrap_label = label[indices].cpu().numpy()
             
-            # Calculate metrics for this bootstrap sample
             bootstrap_metrics = get_metrics(bootstrap_y_score, bootstrap_label, metrics_list, is_binary=self.is_binary)
             
-            # Store results
             for metric in metrics_list:
                 bootstrap_results[metric].append(bootstrap_metrics[metric])
 
         # Calculate confidence intervals (95%)
         confidence_intervals = {}
-        plus_minus_metrics = {}
+        metrics_with_one_std = {}
         for metric in metrics_list:
             values = np.array(bootstrap_results[metric])
             mean_value = results[metric]
@@ -302,15 +299,14 @@ class EEGPTCalibry(pl.LightningModule):
             ci_lower = np.percentile(values, 2.5)
             ci_upper = np.percentile(values, 97.5)
             
-            # Store confidence intervals
             confidence_intervals[f"{metric}_ci_lower"] = ci_lower
             confidence_intervals[f"{metric}_ci_upper"] = ci_upper
             
-            # Calculate plus-minus format (mean ± std)
-            plus_minus_metrics[f"{metric}_pm"] = f"{mean_value:.3f} ± {std_value:.3f}"
+            # Calculate mean metrics with one standard deviation (mean ± std)
+            metrics_with_one_std[f"{metric}_pm"] = f"{mean_value:.4f} ± {std_value:.4f}"
             
             # Calculate plus-minus format with confidence intervals
-            plus_minus_metrics[f"{metric}_pm_ci"] = f"{mean_value:.3f} ({ci_lower:.3f}-{ci_upper:.3f})"
+            metrics_with_one_std[f"{metric}_pm_ci"] = f"{mean_value:.4f} ({ci_lower:.4f}-{ci_upper:.4f})"
 
         # Log regular metrics
         for key, value in results.items():
@@ -320,9 +316,7 @@ class EEGPTCalibry(pl.LightningModule):
         for key, value in confidence_intervals.items():
             self.log('test_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
             
-        # Log plus-minus metrics
-        for key, value in plus_minus_metrics.items():
-            self.log('test_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
+        self.metric_strings = metrics_with_one_std
 
         return super().on_test_epoch_end()
 
