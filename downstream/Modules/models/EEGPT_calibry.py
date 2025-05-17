@@ -46,7 +46,6 @@ class EEGPTCalibry(pl.LightningModule):
         self.max_lr = max_lr
         self.steps_per_epoch = steps_per_epoch
         self.max_epochs = max_epochs
-        self.metric_strings = {}  # Store string representations of metrics
         
         self.save_hyperparameters()
         
@@ -299,25 +298,20 @@ class EEGPTCalibry(pl.LightningModule):
             ci_lower = np.percentile(values, 2.5)
             ci_upper = np.percentile(values, 97.5)
             
-            confidence_intervals[f"{metric}_ci_lower"] = ci_lower
-            confidence_intervals[f"{metric}_ci_upper"] = ci_upper
+            # Save mean metrics with one standard deviation (mean ± std)
+            metrics_with_one_std[metric] = f"{mean_value:.4f} ± {std_value:.4f}"
             
-            # Calculate mean metrics with one standard deviation (mean ± std)
-            metrics_with_one_std[f"{metric}_pm"] = f"{mean_value:.4f} ± {std_value:.4f}"
-            
-            # Calculate plus-minus format with confidence intervals
-            metrics_with_one_std[f"{metric}_pm_ci"] = f"{mean_value:.4f} ({ci_lower:.4f}-{ci_upper:.4f})"
+            # Save confidence intervals
+            metrics_with_one_std[f"{metric}_ci"] = f"{mean_value:.4f} ({ci_lower:.4f}-{ci_upper:.4f})"
 
         # Log regular metrics
         for key, value in results.items():
-            self.log('test_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
+            self.log(key, value, on_epoch=True, on_step=False, sync_dist=True)
             
         # Log confidence intervals
-        for key, value in confidence_intervals.items():
-            self.log('test_' + key, value, on_epoch=True, on_step=False, sync_dist=True)
+        for key, value in metrics_with_one_std.items():
+            self.log(key, value, on_epoch=True, on_step=False, sync_dist=True)
             
-        self.metric_strings = metrics_with_one_std
-
         return super().on_test_epoch_end()
 
     def configure_optimizers(self):
