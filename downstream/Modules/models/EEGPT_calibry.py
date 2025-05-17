@@ -46,7 +46,6 @@ class EEGPTCalibry(pl.LightningModule):
         self.max_lr = max_lr
         self.steps_per_epoch = steps_per_epoch
         self.max_epochs = max_epochs
-        self.metric_strings = {}  # Store string representations of metrics
         
         self.save_hyperparameters()
         
@@ -290,8 +289,8 @@ class EEGPTCalibry(pl.LightningModule):
                 bootstrap_results[metric].append(bootstrap_metrics[metric])
 
         # Calculate confidence intervals (95%)
-        confidence_intervals = {}
-        metrics_with_one_std = {}
+        metrics_ci= {}
+
         for metric in metrics_list:
             values = np.array(bootstrap_results[metric])
             mean_value = results[metric]
@@ -299,26 +298,17 @@ class EEGPTCalibry(pl.LightningModule):
             ci_lower = np.percentile(values, 2.5)
             ci_upper = np.percentile(values, 97.5)
             
-            # Save mean metrics with one standard deviation (mean ± std)
-            metrics_with_one_std[metric] = f"{mean_value:.4f} ± {std_value:.4f}"
-            
-            # Save confidence intervals
-            metrics_with_one_std[f"{metric}_ci"] = f"{mean_value:.4f} ({ci_lower:.4f}-{ci_upper:.4f})"
+            # Store metrics with confidence intervals
+            metrics_ci[metric] = mean_value
+            metrics_ci[f"{metric}_std"] = std_value
+            metrics_ci[f"{metric}_ci_lower"] = ci_lower
+            metrics_ci[f"{metric}_ci_upper"] = ci_upper
 
-        # Log regular metrics
-        for key, value in results.items():
+        # Log metrics with confidence intervals
+        for key, value in metrics_ci.items():
             self.log(key, value, on_epoch=True, on_step=False, sync_dist=True)
-            
-        # Log confidence intervals
-        for key, value in metrics_with_one_std.items():
-            self.log(key, value, on_epoch=True, on_step=False, sync_dist=True)
-            
-        self.metric_strings = metrics_with_one_std
 
         return super().on_test_epoch_end()
-
-    def get_metric_strings(self):
-        return self.metric_strings
 
     def configure_optimizers(self):
         params_to_optimize = list(self.linear_probe1.parameters()) + \
