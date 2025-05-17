@@ -317,6 +317,9 @@ class EEGPTCalibry(pl.LightningModule):
 
         return super().on_test_epoch_end()
 
+    def get_metric_strings(self):
+        return self.metric_strings
+
     def configure_optimizers(self):
         params_to_optimize = list(self.linear_probe1.parameters()) + \
                              list(self.linear_probe2.parameters())
