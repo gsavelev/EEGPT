@@ -105,8 +105,6 @@ class EEGPTCalibry(pl.LightningModule):
                 dropout=lora_dropout
             )
             self.freeze_all_except_lora()
-            
-        self.print_trainable_parameters()
 
     def freeze_all_except_lora(self):
         # Freeze all parameters in the model
@@ -358,17 +356,6 @@ class EEGPTCalibry(pl.LightningModule):
         }
 
         return {'optimizer': optimizer, 'lr_scheduler': lr_dict}
-
-    def print_trainable_parameters(self):
-        """Print the number of trainable parameters."""
-        trainable_params = 0
-        all_params = 0
-        for name, param in self.named_parameters():
-            all_params += param.numel()
-            if param.requires_grad:
-                trainable_params += param.numel()
-                print(f"Trainable: {name}")
-        print(f"Trainable params: {trainable_params:,} || All params: {all_params:,} || Trainable%: {100 * trainable_params / all_params:.2f}%")
 
     def on_load_checkpoint(self, checkpoint):
         """Handle loading checkpoints without LoRA parameters."""
