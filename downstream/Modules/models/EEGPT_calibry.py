@@ -31,7 +31,7 @@ class EEGPTCalibry(pl.LightningModule):
                  enc_drop_path_rate=0.0,
                  use_lora=True,
                  lora_rank=8,
-                 lora_alpha=32,
+                 lora_alpha=16,
                  lora_dropout=0.1,
                  ):
         super().__init__()
@@ -43,6 +43,9 @@ class EEGPTCalibry(pl.LightningModule):
         self.lp2_0_dim = lp2_0_dim
         self.use_chan_scale = use_chan_scale
         self.use_lora = use_lora
+        self.lora_rank = lora_rank
+        self.lora_alpha = lora_alpha
+        self.lora_dropout = lora_dropout
         self.lora_params = None
         self.max_lr = max_lr
         self.steps_per_epoch = steps_per_epoch
