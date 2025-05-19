@@ -86,6 +86,12 @@ class EEGPTCalibry(pl.LightningModule):
         self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
         self.linear_probe2 = LinearWithConstraint(self.lp2_0_dim, self.num_classes, max_norm=0.25)
         
+        # Misc params
+        self.drop = torch.nn.Dropout(p=0.50)
+        self.loss_fn = torch.nn.CrossEntropyLoss()
+        self.running_scores = {"train": [], "valid": [], "test": []}
+        self.is_sanity = True
+
         # Add LoRA if requested
         if use_lora:
             self.target_encoder, self.lora_params = add_lora_to_model(
@@ -94,12 +100,19 @@ class EEGPTCalibry(pl.LightningModule):
                 alpha=lora_alpha, 
                 dropout=lora_dropout
             )
+            self.freeze_all_except_lora()
             
-        # Misc params
-        self.drop = torch.nn.Dropout(p=0.50)
-        self.loss_fn = torch.nn.CrossEntropyLoss()
-        self.running_scores = {"train": [], "valid": [], "test": []}
-        self.is_sanity = True
+        self.print_trainable_parameters()
+
+    def freeze_all_except_lora(self):
+        # Freeze all parameters in the model
+        for param in self.parameters():
+            param.requires_grad = False
+        
+        # Unfreeze LoRA parameters if they exist
+        if self.use_lora and self.lora_params:
+            for param in self.lora_params:
+                param.requires_grad = True
 
     def forward(self, x):
         B, C, T = x.shape
@@ -311,23 +324,18 @@ class EEGPTCalibry(pl.LightningModule):
         return super().on_test_epoch_end()
 
     def configure_optimizers(self):
-        params_to_optimize = list(self.linear_probe1.parameters()) + \
-                             list(self.linear_probe2.parameters())
-
-        if self.use_chan_scale:
-            params_to_optimize.extend([self.chan_scale])
+        if self.use_lora and self.lora_params:
+            params_to_optimize = self.lora_params
         else:
-            params_to_optimize.extend(self.chan_conv.parameters())
+            params_to_optimize = list(self.linear_probe1.parameters()) + \
+                                 list(self.linear_probe2.parameters())
+
+            if self.use_chan_scale:
+                params_to_optimize.extend([self.chan_scale])
+            else:
+                params_to_optimize.extend(self.chan_conv.parameters())
 
         optimizer = torch.optim.AdamW(params_to_optimize, weight_decay=0.01)
-            
-        if self.use_lora and self.lora_params:
-            params_to_optimize.extend(self.lora_params)
-        
-        optimizer = torch.optim.AdamW(
-            params_to_optimize,
-            weight_decay=0.01
-        )
 
         lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer, 
@@ -346,3 +354,14 @@ class EEGPTCalibry(pl.LightningModule):
         }
 
         return {'optimizer': optimizer, 'lr_scheduler': lr_dict}
+
+    def print_trainable_parameters(self):
+        """Print the number of trainable parameters."""
+        trainable_params = 0
+        all_params = 0
+        for name, param in self.named_parameters():
+            all_params += param.numel()
+            if param.requires_grad:
+                trainable_params += param.numel()
+                print(f"Trainable: {name}")
+        print(f"Trainable params: {trainable_params:,} || All params: {all_params:,} || Trainable%: {100 * trainable_params / all_params:.2f}%")
