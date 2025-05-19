@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from functools import partial
 import pytorch_lightning as pl
 import numpy as np
+import math
 
 from .EEGPT_mcae_finetune import EEGTransformer, LinearWithConstraint, Conv1dWithConstraint
 from ..PEFT.lora import add_lora_to_model
@@ -365,3 +366,31 @@ class EEGPTCalibry(pl.LightningModule):
                 trainable_params += param.numel()
                 print(f"Trainable: {name}")
         print(f"Trainable params: {trainable_params:,} || All params: {all_params:,} || Trainable%: {100 * trainable_params / all_params:.2f}%")
+
+    def on_load_checkpoint(self, checkpoint):
+        """Handle loading checkpoints without LoRA parameters."""
+        if self.use_lora:
+            # Initialize LoRA parameters with random values
+            for name, module in self.target_encoder.named_modules():
+                if hasattr(module, 'lora'):
+                    # Initialize lora_A with Kaiming initialization
+                    nn.init.kaiming_uniform_(module.lora.lora_A, a=math.sqrt(5))
+                    # Initialize lora_B with zeros
+                    nn.init.zeros_(module.lora.lora_B)
+                    
+                    # Scale lora_A by alpha/rank as per LoRA paper
+                    module.lora.lora_A.data *= self.lora_alpha / self.lora_rank
+                    
+        return super().on_load_checkpoint(checkpoint)
+
+    def on_save_checkpoint(self, checkpoint):
+        """Handle saving checkpoints with LoRA parameters."""
+        if self.use_lora:
+            # Ensure LoRA parameters are included in the checkpoint
+            state_dict = checkpoint['state_dict']
+            for name, module in self.target_encoder.named_modules():
+                if hasattr(module, 'lora'):
+                    state_dict[f"{name}.lora.lora_A"] = module.lora.lora_A.data
+                    state_dict[f"{name}.lora.lora_B"] = module.lora.lora_B.data
+            checkpoint['state_dict'] = state_dict
+        return super().on_save_checkpoint(checkpoint)
