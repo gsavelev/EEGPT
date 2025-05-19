@@ -373,7 +373,9 @@ class EEGPTCalibry(pl.LightningModule):
     def on_load_checkpoint(self, checkpoint):
         """Handle loading checkpoints without LoRA parameters."""
         if self.use_lora:
-            # Initialize LoRA parameters with random values
+            state_dict = checkpoint['state_dict']
+            
+            # Initialize and inject LoRA parameters if they don't exist
             for name, module in self.target_encoder.named_modules():
                 if hasattr(module, 'lora'):
                     # Initialize lora_A with Kaiming initialization
@@ -384,16 +386,11 @@ class EEGPTCalibry(pl.LightningModule):
                     # Scale lora_A by alpha/rank as per LoRA paper
                     module.lora.lora_A.data *= self.lora_alpha / self.lora_rank
                     
-        return super().on_load_checkpoint(checkpoint)
-
-    def on_save_checkpoint(self, checkpoint):
-        """Handle saving checkpoints with LoRA parameters."""
-        if self.use_lora:
-            # Ensure LoRA parameters are included in the checkpoint
-            state_dict = checkpoint['state_dict']
-            for name, module in self.target_encoder.named_modules():
-                if hasattr(module, 'lora'):
+                    # Inject the initialized parameters into state_dict
                     state_dict[f"{name}.lora.lora_A"] = module.lora.lora_A.data
                     state_dict[f"{name}.lora.lora_B"] = module.lora.lora_B.data
+            
+            # Update the checkpoint's state_dict
             checkpoint['state_dict'] = state_dict
-        return super().on_save_checkpoint(checkpoint)
+            
+        return super().on_load_checkpoint(checkpoint)
