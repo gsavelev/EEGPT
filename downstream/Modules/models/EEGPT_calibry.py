@@ -374,8 +374,8 @@ class EEGPTCalibry(pl.LightningModule):
                     module.lora.lora_A.data *= self.lora_alpha / self.lora_rank
                     
                     # Inject the initialized parameters into state_dict
-                    state_dict[f"{name}.lora.lora_A"] = module.lora.lora_A.data
-                    state_dict[f"{name}.lora.lora_B"] = module.lora.lora_B.data
+                    state_dict[f"target_encoder.{name}.lora.lora_A"] = module.lora.lora_A.data
+                    state_dict[f"target_encoder.{name}.lora.lora_B"] = module.lora.lora_B.data
             
             # Update the checkpoint's state_dict
             checkpoint['state_dict'] = state_dict
