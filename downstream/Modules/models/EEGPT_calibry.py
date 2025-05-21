@@ -78,7 +78,7 @@ class EEGPTCalibry(pl.LightningModule):
             if k.startswith("target_encoder."):
                 target_encoder_stat[k[15:]] = v  # Remove 'target_encoder.' prefix
         
-        self.target_encoder.load_state_dict(target_encoder_stat)
+        self.target_encoder.load_state_dict(target_encoder_stat, strict=False)  # to add LoRA parameters to pretrained linear probe
 
         # Freeze model's params
         for param in self.target_encoder.parameters():
@@ -358,7 +358,6 @@ class EEGPTCalibry(pl.LightningModule):
         return {'optimizer': optimizer, 'lr_scheduler': lr_dict}
 
     def on_load_checkpoint(self, checkpoint):
-        """Handle loading checkpoints without LoRA parameters."""
         if self.use_lora:
             state_dict = checkpoint['state_dict']
             
