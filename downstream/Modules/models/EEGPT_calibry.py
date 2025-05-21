@@ -78,7 +78,7 @@ class EEGPTCalibry(pl.LightningModule):
             if k.startswith("target_encoder."):
                 target_encoder_stat[k[15:]] = v  # Remove 'target_encoder.' prefix
         
-        self.target_encoder.load_state_dict(target_encoder_stat, strict=False)
+        self.target_encoder.load_state_dict(target_encoder_stat)
 
         # Freeze model's params
         for param in self.target_encoder.parameters():
@@ -117,8 +117,7 @@ class EEGPTCalibry(pl.LightningModule):
                 param.requires_grad = True
 
     def forward(self, x):
-        B, C, T = x.shape
-
+        # B, C, T = x.shape
         if self.use_chan_scale:
             x = x.to(torch.float)
             x = x - x.mean(dim=-2, keepdim=True)
@@ -357,26 +356,26 @@ class EEGPTCalibry(pl.LightningModule):
 
         return {'optimizer': optimizer, 'lr_scheduler': lr_dict}
 
-    # def on_load_checkpoint(self, checkpoint):
-    #     if self.use_lora:
-    #         state_dict = checkpoint['state_dict']
-            
-    #         # Initialize and inject LoRA parameters if they don't exist
-    #         for name, module in self.target_encoder.named_modules():
-    #             if hasattr(module, 'lora'):
-    #                 # Initialize lora_A with Kaiming initialization
-    #                 nn.init.kaiming_uniform_(module.lora.lora_A, a=math.sqrt(5))
-    #                 # Initialize lora_B with zeros
-    #                 nn.init.zeros_(module.lora.lora_B)
+    def on_load_checkpoint(self, checkpoint):
+        if self.use_lora:
+            state_dict = checkpoint['state_dict']
+
+            # Initialize and inject LoRA parameters if they don't exist
+            for name, module in self.target_encoder.named_modules():
+                if hasattr(module, 'lora'):
+                    # Initialize lora_A with Kaiming initialization
+                    nn.init.kaiming_uniform_(module.lora.lora_A, a=math.sqrt(5))
+                    # Initialize lora_B with zeros
+                    nn.init.zeros_(module.lora.lora_B)
                     
-    #                 # Scale lora_A by alpha/rank as per LoRA paper
-    #                 module.lora.lora_A.data *= self.lora_alpha / self.lora_rank
+                    # Scale lora_A by alpha/rank as per LoRA paper
+                    module.lora.lora_A.data *= self.lora_alpha / self.lora_rank
                     
-    #                 # Inject the initialized parameters into state_dict
-    #                 state_dict[f"target_encoder.{name}.lora.lora_A"] = module.lora.lora_A.data
-    #                 state_dict[f"target_encoder.{name}.lora.lora_B"] = module.lora.lora_B.data
+                    # Inject the initialized parameters into state_dict
+                    state_dict[f"target_encoder.{name}.lora.lora_A"] = module.lora.lora_A.data
+                    state_dict[f"target_encoder.{name}.lora.lora_B"] = module.lora.lora_B.data
             
-    #         # Update the checkpoint's state_dict
-    #         checkpoint['state_dict'] = state_dict
+            # Update the checkpoint's state_dict
+            checkpoint['state_dict'] = state_dict
             
-    #     return super().on_load_checkpoint(checkpoint)
+        return super().on_load_checkpoint(checkpoint)
