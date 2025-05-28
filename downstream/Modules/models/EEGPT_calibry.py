@@ -30,8 +30,8 @@ class EEGPTCalibry(pl.LightningModule):
                  enc_attn_drop_rate=0.0,
                  enc_drop_path_rate=0.0,
                  use_lora=True,
-                 lora_rank=8,
-                 lora_alpha=16,
+                 lora_rank=16,
+                 lora_alpha=32,
                  lora_dropout=0.1,
                  ):
         super().__init__()
@@ -90,21 +90,21 @@ class EEGPTCalibry(pl.LightningModule):
         self.linear_probe1 = LinearWithConstraint(2048, 16, max_norm=1)
         self.linear_probe2 = LinearWithConstraint(self.lp2_0_dim, self.num_classes, max_norm=0.25)
         
+        # Add LoRA if requested
+        if use_lora:
+            self.target_encoder, self.lora_params = add_lora_to_model(
+                self.target_encoder, 
+                rank=self.lora_rank, 
+                alpha=self.lora_alpha, 
+                dropout=self.lora_dropout
+            )
+            self.freeze_all_except_lora()
+
         # Misc params
         self.drop = torch.nn.Dropout(p=0.50)
         self.loss_fn = torch.nn.CrossEntropyLoss()
         self.running_scores = {"train": [], "valid": [], "test": []}
         self.is_sanity = True
-
-        # Add LoRA if requested
-        if use_lora:
-            self.target_encoder, self.lora_params = add_lora_to_model(
-                self.target_encoder, 
-                rank=lora_rank, 
-                alpha=lora_alpha, 
-                dropout=lora_dropout
-            )
-            self.freeze_all_except_lora()
 
     def freeze_all_except_lora(self):
         # Freeze all parameters in the model
@@ -325,16 +325,16 @@ class EEGPTCalibry(pl.LightningModule):
         return super().on_test_epoch_end()
 
     def configure_optimizers(self):
-        if self.use_lora and self.lora_params:
-            params_to_optimize = self.lora_params
-        else:
-            params_to_optimize = list(self.linear_probe1.parameters()) + \
-                                 list(self.linear_probe2.parameters())
+        params_to_optimize = list(self.linear_probe1.parameters()) + \
+                             list(self.linear_probe2.parameters())
 
-            if self.use_chan_scale:
-                params_to_optimize.extend([self.chan_scale])
-            else:
-                params_to_optimize.extend(self.chan_conv.parameters())
+        if self.use_chan_scale:
+            params_to_optimize.extend([self.chan_scale])
+        else:
+            params_to_optimize.extend(self.chan_conv.parameters())
+
+        if self.use_lora and self.lora_params:
+            params_to_optimize.extend(self.lora_params)
 
         optimizer = torch.optim.AdamW(params_to_optimize, weight_decay=0.01)
 
