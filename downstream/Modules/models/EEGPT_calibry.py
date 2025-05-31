@@ -25,6 +25,7 @@ class EEGPTCalibry(pl.LightningModule):
                  max_lr=1e-3,
                  steps_per_epoch=100,
                  max_epochs=10,
+                 weight_decay=0.1,
                  qkv_bias=True,
                  enc_drop_rate=0.0,
                  enc_attn_drop_rate=0.0,
@@ -50,6 +51,7 @@ class EEGPTCalibry(pl.LightningModule):
         self.max_lr = max_lr
         self.steps_per_epoch = steps_per_epoch
         self.max_epochs = max_epochs
+        self.weight_decay = weight_decay
         
         self.save_hyperparameters()
         
@@ -336,7 +338,7 @@ class EEGPTCalibry(pl.LightningModule):
         if self.use_lora and self.lora_params:
             params_to_optimize.extend(self.lora_params)
 
-        optimizer = torch.optim.AdamW(params_to_optimize, weight_decay=0.01)
+        optimizer = torch.optim.AdamW(params_to_optimize, weight_decay=self.weight_decay)
 
         lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer, 
